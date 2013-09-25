@@ -1,0 +1,393 @@
+#!/bin/bash
+#
+# wrap_syscalls.sh
+# Extract syscall entry points and wrap them in a library
+#
+CDIR="$(cd `dirname $0` && pwd)"
+
+# keep a "pretty-fied" version of the command for the C file header
+# sorry about the sed-mess:
+#     the OSX version doesn't like things like \s or \d # :-(
+# (look at the generated output for an idea of what's going on)
+__CMD="`echo -e '\n *\t'`$0 \\`echo -e '\n *\t'`\
+	$(echo $@ | \
+	  sed "s/\([^ ][^ ]*\)[ ][ ]*\([^ ][^ ]*\) /\1 \2 \\\\\\`echo -e '\n *\t\t'`/g")"
+
+
+OBJDUMP_PFX=${CROSS_COMPILE:-arm-eabi-}
+
+FILE=`which file`
+OTOOL=`which otool`
+ELF_OBJDUMP=`which ${OBJDUMP_PFX}objdump`
+
+ELF_SYSCALL_EXTRACT="${CDIR}/elf_syscalls.pl"
+MACHO_SYSCALL_EXTRACT="${CDIR}/macho_syscalls.pl"
+
+if [ -z "$FILE" ]; then
+	echo "WARNING: Can't find 'file' utility be sure to specify the library type!"
+fi
+
+ARCH=android
+
+LIB=
+LIBDIR=
+LIBTYPE=
+LIBPATH=
+RETTYPE=uint64_t
+PARAM_TYPE=uint32_t
+OUTDIR=.
+declare -a ENTRY_POINTS=( )
+
+function usage() {
+	echo -e "Usage: $0 --lib path/to/library "
+	echo -r "                          [--arch {arm|x86}]"
+	echo -e "                          [--type {elf|macho}]"
+	echo -e "                          [--rettype {c-type}]"
+	echo -e "                          [--paramtype {c-type}]"
+	echo -e "                          [--out path/to/output/dir]"
+	echo -e ""
+	echo -e "\t--arch {android|arm|x86}        Architecture for syscall wrappers"
+	echo -e "\t--lib path/to/library           Library (or directory of libraries) to search for syscalls"
+	echo -e ""
+	echo -e "\t--type {elf|macho}              Specify the type of input library (avoid auto-detection)"
+	echo -e ""
+	echo -e "\t--rettype {c-type}              Specify the type of output returned by each wrapper function"
+	echo -e "\t                                default: uint64_t"
+	echo -e ""
+	echo -e "\t--paramtype {c-type}            Specify the type of each input passed to each wrapper function"
+	echo -e "\t                                default: uint32_t"
+	echo -e ""
+	echo -e "\t--out output/dir                Directory to put output C wrappers (defaults to .)"
+	echo -e ""
+	echo -e "Environment variables:"
+	echo -e "\tCROSS_COMPILE                   Used to properly dump ELF objects. Defaults to 'arm-eabi-'"
+	echo -e ""
+	exit 1
+}
+
+#
+# Process input args
+#
+while [[ ! -z "$1" ]]; do
+	case "$1" in
+		-h | --help )
+			usage
+			;;
+		--arch )
+			if [ "$2" != "android" ]; then
+				echo "E:"
+				echo "E: Architectures other than 'android' are not yet supported!"
+				echo "E:"
+				usage
+			fi
+			ARCH="$2"
+			shift
+			shift
+			;;
+		--lib )
+			if [ -d "$2" ]; then
+				LIBDIR="$2"
+			elif [ -f "$2" ]; then
+				LIB=$2
+			else
+				echo "E:"
+				echo "E: Invalid lib parameter: '$2'"
+				echo "E:"
+				usage
+			fi
+			shift
+			shift
+			;;
+		--type )
+			LIBTYPE=$2
+			shift
+			shift
+			;;
+		--rettype )
+			RETTYPE=$2
+			shift
+			shift
+			;;
+		--paramtype )
+			PARAM_TYPE=$2
+			shift
+			shift
+			;;
+		--out )
+			OUTDIR=$2
+			shift
+			shift
+			;;
+		* )
+			echo -e "Unknown option '$1': ignoring"
+			shift
+			;;
+	esac
+done
+
+#
+# Validate inputs
+#
+if [ -z "$LIB" -a -z "$LIBDIR" ]; then
+	usage
+fi
+
+if [ -z "$LIBTYPE" -a ! -z "$LIBDIR" ]; then
+	echo ""
+	echo "You must specify a library type with --type when processing a directory!"
+	echo ""
+	usage
+fi
+
+#
+# type of wrapping to do
+#
+if [ -z "$LIBTYPE" ]; then
+	if [ ! -z "$($FILE "$LIB" | grep -i Mach-O)" ]; then
+		LIBTYPE="macho"
+	elif [ ! -z "$($FILE "$LIB" | grep ELF)" ]; then
+		LIBTYPE="elf"
+	fi
+fi
+
+
+#
+# Verify tools/input
+#
+if [ "$LIBTYPE" = "macho" ]; then
+	if [ -z "$OTOOL" -o ! -x "$OTOOL" ]; then
+		echo "Can't find otool in your path - have you installed the command-line Developer tools?"
+		exit 2
+	fi
+elif [ "$LIBTYPE" = "elf" ]; then
+	if [ -z "$ELF_OBJDUMP" -o ! -x "$ELF_OBJDUMP" ]; then
+		echo "Can't find ${OBJDUMP_PFX}objdump in your path."
+		exit 2
+	fi
+fi
+
+
+declare -a SYSCALLS=( )
+
+#
+# Locate all syscalls in a given library
+#
+function extract_syscalls() {
+	local extract_pl="${CDIR}/scripts/${LIBTYPE}_${ARCH}_syscalls.pl"
+	if [ ! -f "$extract_pl" ]; then
+		echo "E:"
+		echo "E: missing syscall extraction perl script: '$extract_pl'"
+		echo "E:"
+	fi
+	if [ "$LIBTYPE" = "elf" ]; then
+		SYSCALLS=( $(${ELF_OBJDUMP} -d "$1" | "$extract_pl") )
+	elif [ "$LIBTYPE" = "macho" ]; then
+		SYSCALLS=( $(${OTOOL} -tv "$1" | "$extract_pl") )
+	else
+		echo "E:"
+		echo "E: unsupported lib type:'$LIBTYPE'"
+		echo "E:"
+		exit 1
+	fi
+}
+
+#
+# Start the output file
+#
+FILE_HEADER=
+FILE_FOOTER=
+
+function __setup_wrapped_lib() {
+	local dir="$1"
+	local asm="$2"
+	local module_name="$(basename "${asm%.*}")_wrapped"
+
+	# We have to set these variables here to pick up
+	# any new definitions of LIB, LIBPATH, etc.
+	FILE_HEADER=$(cat -<<__EOF
+/*
+ * Wrapper library for ${LIB}
+ *
+ * WARNING: EDIT AT YOUR OWN RISK!
+ * WARNING: This file was automatically generated by: ${__CMD}
+ *
+ */
+#define WRAP_TRACE_FUNC wrapped_tracer
+#include <asm/wrap_start.h>
+
+WRAP_LIB(${LIB}, ${LIBPATH})
+
+__EOF)
+
+	FILE_FOOTER=$(cat -<<__EOF
+#include <asm/wrap_end.h>
+#undef WRAP_TRACE_FUNC
+__EOF)
+
+	ANDROID_MK=$(cat -<<__EOF
+LOCAL_PATH := \$(call my-dir)
+include \$(CLEAR_VARS)
+LOCAL_CFLAGS := -std=gnu99 -DPTHREAD_DEBUG -DPTHREAD_DEBUG_ENABLED=0 \\
+		-DCRT_LEGACY_WORKAROUND
+LOCAL_ASFLAGS += -I\$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include
+LOCAL_SRC_FILES := \\
+		$(basename "$asm") \\
+		wrap_lib.c
+LOCAL_NO_CRT := true
+LOCAL_SRC_FILES := \\
+		platform/android/crtbegin_so.c \\
+		platform/android/atexit_legacy.c \\
+		\$(LOCAL_SRC_FILES) \\
+		platform/android/\$(TARGET_ARCH)/crtend_so.S
+LOCAL_MODULE:= ${module_name}
+LOCAL_ADDITIONAL_DEPENDENCIES := \$(LOCAL_PATH)/Android.mk
+# should _only_ depend on libdl - anything else will cause problems!
+LOCAL_SHARED_LIBRARIES := libdl
+include \$(BUILD_SHARED_LIBRARY)
+__EOF)
+
+	mkdir -p "$dir" 2>/dev/null
+	ln -s "${CDIR}/wrap_lib.c" "${dir}"
+	ln -s "${CDIR}/wrap_lib.h" "${dir}"
+	ln -s "${CDIR}/arch" "${dir}"
+	ln -s "${CDIR}/platform" "${dir}"
+	echo "${ANDROID_MK}" > "${dir}/Android.mk"
+
+	# start the ASM file
+	echo "${FILE_HEADER}" > "${asm}"
+}
+
+function write_wrappers() {
+	local _libname="${OUTDIR}/$1/$(basename $1)"
+	local libname=
+	local dir=$(dirname "${_libname}")
+	local fcn=
+	local num=
+	if [ "$LIBTYPE" = "elf" ]; then
+		libname=${_libname%.so}.S
+	else
+		libname=${_libname%.dylib}.S
+	fi
+
+	LIB="$1"
+	LIBPATH="$2"
+	__setup_wrapped_lib "${dir}" "${libname}"
+
+	for sc in "${SYSCALLS[@]}"; do
+		fcn=${sc#*:}
+		num=${sc%:*}
+		echo "WRAP_FUNC(${LIB}, ${fcn})" >> "${libname}"
+	done
+
+	# TODO: write out standard "pass" functions */
+
+	echo "${FILE_FOOTER}" >> "${libname}"
+}
+
+#
+# Find entry points in the Mach-O binary
+#
+#function macho_syscalls() {
+#	ENTRY_POINTS=( $(${OTOOL} -tv "$LIB" | grep '^[^[]*:\s*$' | grep -v "$LIB" | sed 's/:[ ]*//g') )
+#	echo "Found ${#ENTRY_POINTS[@]} C-style entry points"
+#
+#	if [ ${#ELF_LIBDIR[@]} -eq 0 ]; then
+#		for e in "${ENTRY_POINTS[@]}"; do
+#			echo -e "\tMach-O Entry: '$e'"
+#		done
+#		exit
+#	fi
+#}
+
+#
+# Get a listing of all the ELF shared libraries (*.so files)
+# and their associated entry points.
+#
+#declare -a WRAPPED_LIBS=( )
+#declare -a WRAPPED_LIB_NAME=( )
+#declare -a WRAPPED_ENTRY_POINTS=( )
+#function cache_elf_entry_points() {
+#	dir=$1
+#	echo "Finding all ELF entry points in '$dir'..."
+#	WRAPPED_LIBS+=( $(find "${dir}" -maxdepth 2 -type f -name *.so) )
+#	# XXX: This is not efficient, or pretty sorry - should refactor somehow...
+#	WRAPPED_LIB_NAME=( )
+#	WRAPPED_ENTRY_POINTS=( )
+#	for idx in $(seq 0 $((${#WRAPPED_LIBS[@]}-1))); do
+#		lib=${WRAPPED_LIBS[$idx]}
+#		_lib=${lib##*/}
+#		epfile="${CACHEDIR}/.${_lib}.fcns"
+#		elf_entry_points "${lib}" "${epfile}"
+#
+#		WRAPPED_LIB_NAME+=( "$_lib" )
+#		WRAPPED_ENTRY_POINTS+=( "$epfile" )
+#	done
+#}
+#
+#function remove_entry_point_cache() {
+#	for idx in $(seq 0 $((${#WRAPPED_ENTRY_POINTS[@]}-1))); do
+#		epfile="${WRAPPED_ENTRY_POINTS[$idx]}"
+#		if [ -e "$epfile" ]; then
+#			rm -f "${epfile}" > /dev/null 2>&1
+#		fi
+#	done
+#}
+#
+#__ELF_FUNC_NAME=
+#__ELF_LIBNAME_FOR_FUNC=
+#__ELF_LIBPATH_FOR_FUNC=
+#function find_entry_point() {
+#	funcname=$1
+#	__ELF_FUNC_NAME=
+#	__ELF_LIBNAME_FOR_FUNC=
+#	__ELF_LIBPATH_FOR_FUNC=
+#	for idx in $(seq 0 $((${#WRAPPED_LIBS[@]}-1))); do
+#		epfile="${WRAPPED_ENTRY_POINTS[$idx]}"
+#		__found=$(grep "\<${funcname}\>" "${epfile}")
+#		if [ ! -z "$__found" ]; then
+#			__ELF_FUNC_NAME=${funcname}
+#			__ELF_LIBNAME_FOR_FUNC="${WRAPPED_LIB_NAME[$idx]}"
+#			__ELF_LIBPATH_FOR_FUNC="${WRAPPED_LIBS[$idx]}"
+#			break
+#		fi
+#	done
+#}
+#
+##
+## Find and cache all the ELF entry points in the valid ELF library dirs
+#for dir in "${__valid_elf_libdir[@]}"; do
+#	cache_elf_entry_points "${dir}"
+#done
+
+LIB_BASE=
+if [ "$LIBTYPE" = "elf" ]; then
+	if [ "$ARCH" = "android" ]; then
+		LIB_BASE="/system/lib"
+	else
+		LIB_BASE="/lib"
+	fi
+elif [ "$LIBTYPE" = "macho" ]; then
+	LIB_BASE="/usr/lib"
+fi
+
+if [ -z "${LIB}" -a -d "${LIBDIR}" ]; then
+	ALL_LIBS=
+	if [ "$LIBTYPE" = "elf" ]; then
+		ALL_LIBS="$(find "${LIBDIR}" -type f -name *so)"
+	elif [ "$LIBTYPE" = "macho" ]; then
+		ALL_LIBS="$(find "${LIBDIR}" -type f -name *dylib)"
+	fi
+	echo "LIBS of type $LIBTYPE in '$LIBDIR': '$ALL_LIBS'"
+	for l in "$ALL_LIBS"; do
+		echo "Processing '$l'..."
+		extract_syscalls "$l"
+		# use path relative to 'LIBDIR'
+		_l="${l#${LIBDIR}/}"
+		write_wrappers "${_l}" "${LIB_BASE}/${_l}"
+	done
+else
+	extract_syscalls "$LIB"
+	write_wrappers "$LIB" "${LIB_BASE}/$(basename $LIB)"
+fi
+
+
