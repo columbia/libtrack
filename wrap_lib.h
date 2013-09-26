@@ -35,7 +35,7 @@ extern int init_libc_iface(struct libc_iface *iface, const char *dso_path);
 
 #define get_errno(libc) \
 	((libc)->errno ? *(libc)->errno : \
-	 ((libc)->__errno ? *((libc)->__errno()) : *((int *)0)))
+	 ((libc)->__errno ? *((libc)->__errno()) : *((volatile int *)0)))
 
 #define mod_errno(libc, op, val) \
 	do { \

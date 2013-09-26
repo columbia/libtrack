@@ -25,9 +25,8 @@
 #define _amarg(arg,pos)			#pos
 #define FUNC(x) concat(_,x)
 #define ENTRY(x) \
-	.text; .align 4; .globl x; x: .fnstart
-#define END(x) \
-	.fnend
+	.text; .align 4; .globl FUNC(x);  FUNC(x):
+#define END(x)
 #if defined(MODEL_armv6)
         .machine  armv6
         .macro  cbz
@@ -41,6 +40,8 @@
         .endm
         .macro  .size
         .endm
+	.macro  .save
+	.endm
 #else /* non-Apple assembler (presumably GNU) */
 #define LBL(s) .L ## s
 #define MACRO0(nm)			.macro nm
