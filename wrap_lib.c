@@ -12,6 +12,9 @@
 
 #include "wrap_lib.h"
 
+static int g_log_fd = -1;
+static struct libc_iface libc;
+
 /**
  * @wrapped_dlsym Locate a symbol within a library, possibly loading the lib.
  * @param libpath Full path to the library in which symbol should be found
@@ -38,28 +41,6 @@ void *wrapped_dlsym(const char *libpath, void **lib_handle, const char *symbol)
 	return sym;
 }
 
-static int g_log_fd = -1;
-void *g_libc_handle = NULL;
-static int (*f_open)(const char *pathname, int flags) = NULL;
-static ssize_t (*f_write)(int fd, const void *buf, size_t count) = NULL;
-static int (*f_snprintf)(char *str, size_t size, const char *format, ...);
-
-static int init_libc_iface(void)
-{
-	if (!g_libc_handle) {
-		g_libc_handle = dlopen(LIBC_PATH, RTLD_NOW | RTLD_LOCAL);
-		if (!g_libc_handle)
-			return -1;
-	}
-	f_open = dlsym(g_libc_handle, "open");
-	f_write = dlsym(g_libc_handle, "write");
-	f_snprintf = dlsym(g_libc_handle, "snprintf");
-	//*errno = 0x20000000;
-	if (!f_open|| !f_write|| !f_snprintf)
-		return -1;
-	return 0;
-}
-
 /**
  * @wrapped_tracer Default tracing function that stores a backtrace
  * @param symbol The symbol from which wrapped_tracer is being called
@@ -71,18 +52,19 @@ void wrapped_tracer(const char *symbol)
 	char buf[128];
 
 	/* quick check for recursive calls */
-#if 0
-	if (*errno & 0x20000000)
+	if (!libc.dso)
+		if (init_libc_iface(&libc, LIBC_PATH) < 0)
+			goto out_noerrno;
+	if (get_errno(&libc) & 0x20000000)
 		return;
 	/* TODO: setup TLS value via pthread_setspecific! */
-	*errno = 0x20000000;
-#endif
+	mod_errno(&libc, |=, 0x20000000);
 
 	if (g_log_fd < 0) {
-		if (init_libc_iface() < 0)
+		if (init_libc_iface(&libc, LIBC_PATH) < 0)
 			goto out;
-		g_log_fd = f_open(LOGFILE_PATH, O_CREAT | O_APPEND | O_CLOEXEC);
-		//*errno = 0x20000000;
+		g_log_fd = libc.open(LOGFILE_PATH, O_CREAT | O_APPEND | O_CLOEXEC);
+		mod_errno(&libc, |=, 0x20000000);
 		if (g_log_fd < 0)
 			goto out;
 	}
@@ -90,9 +72,37 @@ void wrapped_tracer(const char *symbol)
 	/*
 	 * TODO: perform backtrace here
 	 */
-	len = f_snprintf(buf, sizeof(buf), "%s\n", symbol);
-	f_write(g_log_fd, buf, len);
+	len = libc.snprintf(buf, sizeof(buf), "%s\n", symbol);
+	libc.write(g_log_fd, buf, len);
 out:
-	//*errno &= 0x20000000;
+	mod_errno(&libc, &=, 0x20000000);
+out_noerrno:
 	return;
 }
+
+int init_libc_iface(struct libc_iface *iface, const char *dso_path)
+{
+	if (!iface->dso) {
+		iface->dso = dlopen(dso_path, RTLD_NOW | RTLD_LOCAL);
+		if (!iface->dso)
+			return -1;
+	}
+#define init_sym(iface,sym) \
+	if (!(iface)->sym) \
+		(iface)->sym = dlsym((iface)->dso, #sym)
+
+	init_sym(iface, open);
+	init_sym(iface, write);
+	init_sym(iface, snprintf);
+	init_sym(iface, errno);
+	init_sym(iface, __errno);
+
+	if (!iface->open || !iface->write || !iface->snprintf)
+		return -1;
+	if (!iface->errno && !iface->__errno)
+		return -1;
+
+	mod_errno(iface, |=, 0x20000000);
+	return 0;
+}
+

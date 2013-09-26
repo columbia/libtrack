@@ -40,7 +40,7 @@ declare -a ENTRY_POINTS=( )
 
 function usage() {
 	echo -e "Usage: $0 --lib path/to/library "
-	echo -r "                          [--arch {arm|x86}]"
+	echo -e "                          [--arch {arm|x86}]"
 	echo -e "                          [--type {elf|macho}]"
 	echo -e "                          [--rettype {c-type}]"
 	echo -e "                          [--paramtype {c-type}]"
@@ -168,11 +168,13 @@ fi
 
 
 declare -a SYSCALLS=( )
+declare -a FUNCTIONS=( )
 
 #
 # Locate all syscalls in a given library
 #
 function extract_syscalls() {
+	echo -e "\textracting syscalls..."
 	local extract_pl="${CDIR}/scripts/${LIBTYPE}_${ARCH}_syscalls.pl"
 	if [ ! -f "$extract_pl" ]; then
 		echo "E:"
@@ -269,95 +271,90 @@ function write_wrappers() {
 		libname=${_libname%.dylib}.S
 	fi
 
-	LIB="$1"
+	LIB="$(basename $1)"
 	LIBPATH="$2"
+	echo -e "\tcreating library project in '${dir}'..."
 	__setup_wrapped_lib "${dir}" "${libname}"
 
+	echo -e "\twriting ${#SYSCALLS[@]} syscall wrappers..."
 	for sc in "${SYSCALLS[@]}"; do
 		fcn=${sc#*:}
 		num=${sc%:*}
 		echo "WRAP_FUNC(${LIB}, ${fcn})" >> "${libname}"
 	done
 
-	# TODO: write out standard "pass" functions */
+	echo "" >> "${libname}"
+
+	echo -e "\twriting ${#FUNCTIONS[@]} function wrappers..."
+	for e in "${FUNCTIONS[@]}"; do
+		echo "PASS_FUNC(${LIB}, $e)" >> "${libname}"
+	done
 
 	echo "${FILE_FOOTER}" >> "${libname}"
 }
 
-#
-# Find entry points in the Mach-O binary
-#
-#function macho_syscalls() {
-#	ENTRY_POINTS=( $(${OTOOL} -tv "$LIB" | grep '^[^[]*:\s*$' | grep -v "$LIB" | sed 's/:[ ]*//g') )
-#	echo "Found ${#ENTRY_POINTS[@]} C-style entry points"
-#
-#	if [ ${#ELF_LIBDIR[@]} -eq 0 ]; then
-#		for e in "${ENTRY_POINTS[@]}"; do
-#			echo -e "\tMach-O Entry: '$e'"
-#		done
-#		exit
-#	fi
-#}
+__FOUND_SYSCALL=0
+function is_syscall() {
+	local funcname="$1"
+	local _found=$(echo "${SYSCALLS[@]}" | grep -v grep | grep "\<${funcname}\>")
+	__FOUND_SYSCALL=0
+	if [ ! -z "$_found" ]; then
+		__FOUND_SYSCALL=1
+	fi
+}
 
 #
-# Get a listing of all the ELF shared libraries (*.so files)
-# and their associated entry points.
+# Find entry points in a Mach-O binary
 #
-#declare -a WRAPPED_LIBS=( )
-#declare -a WRAPPED_LIB_NAME=( )
-#declare -a WRAPPED_ENTRY_POINTS=( )
-#function cache_elf_entry_points() {
-#	dir=$1
-#	echo "Finding all ELF entry points in '$dir'..."
-#	WRAPPED_LIBS+=( $(find "${dir}" -maxdepth 2 -type f -name *.so) )
-#	# XXX: This is not efficient, or pretty sorry - should refactor somehow...
-#	WRAPPED_LIB_NAME=( )
-#	WRAPPED_ENTRY_POINTS=( )
-#	for idx in $(seq 0 $((${#WRAPPED_LIBS[@]}-1))); do
-#		lib=${WRAPPED_LIBS[$idx]}
-#		_lib=${lib##*/}
-#		epfile="${CACHEDIR}/.${_lib}.fcns"
-#		elf_entry_points "${lib}" "${epfile}"
+function macho_functions() {
+	local dylib="$1"
+	local entries=( $(${OTOOL} -tv "$dylib" | grep '^[^[]*:\s*$' \
+				| grep -v "$dylib" | sed 's/:[ ]*//g') )
+	FUNCTIONS=( )
+	for idx in $(seq 0 $((${#entries[@]}-1))); do
+		is_syscall "${entries[$idx]}"
+		if [ $__FOUND_SYSCALL -eq 0 ]; then
+			FUNCTIONS+=( "${entries[$idx]}" )
+		fi
+	done
+	echo -e "\t    (found ${#entries[@]} Mach-O entry points, ${#FUNCTIONS[@]} non-syscall)"
+}
+
 #
-#		WRAPPED_LIB_NAME+=( "$_lib" )
-#		WRAPPED_ENTRY_POINTS+=( "$epfile" )
-#	done
-#}
+# Find entry points in an ELF binary
 #
-#function remove_entry_point_cache() {
-#	for idx in $(seq 0 $((${#WRAPPED_ENTRY_POINTS[@]}-1))); do
-#		epfile="${WRAPPED_ENTRY_POINTS[$idx]}"
-#		if [ -e "$epfile" ]; then
-#			rm -f "${epfile}" > /dev/null 2>&1
-#		fi
-#	done
-#}
-#
-#__ELF_FUNC_NAME=
-#__ELF_LIBNAME_FOR_FUNC=
-#__ELF_LIBPATH_FOR_FUNC=
-#function find_entry_point() {
-#	funcname=$1
-#	__ELF_FUNC_NAME=
-#	__ELF_LIBNAME_FOR_FUNC=
-#	__ELF_LIBPATH_FOR_FUNC=
-#	for idx in $(seq 0 $((${#WRAPPED_LIBS[@]}-1))); do
-#		epfile="${WRAPPED_ENTRY_POINTS[$idx]}"
-#		__found=$(grep "\<${funcname}\>" "${epfile}")
-#		if [ ! -z "$__found" ]; then
-#			__ELF_FUNC_NAME=${funcname}
-#			__ELF_LIBNAME_FOR_FUNC="${WRAPPED_LIB_NAME[$idx]}"
-#			__ELF_LIBPATH_FOR_FUNC="${WRAPPED_LIBS[$idx]}"
-#			break
-#		fi
-#	done
-#}
-#
-##
-## Find and cache all the ELF entry points in the valid ELF library dirs
-#for dir in "${__valid_elf_libdir[@]}"; do
-#	cache_elf_entry_points "${dir}"
-#done
+function elf_functions() {
+	local lib="$1"
+	local fcn=
+	local entries=( $(${ELF_OBJDUMP} -d "${lib}" \
+				| grep '^[0-9a-f][0-9a-f]* <[^>][^>]*>:' \
+				| sed 's/.*<\([^>]*\)>:/\1/') )
+	FUNCTIONS=( )
+	for idx in $(seq 0 $((${#entries[@]}-1))); do
+		fcn="${entries[$idx]}"
+		is_syscall "$fcn"
+		if [ $__FOUND_SYSCALL -eq 0 ]; then
+			if [ "$fcn" != "atexit" ]; then
+				FUNCTIONS+=( "$fcn" )
+			fi
+		fi
+	done
+	echo -e "\t    (found ${#entries[@]} ELF entry points, ${#FUNCTIONS[@]} non-syscall)"
+}
+
+function extract_functions() {
+	local libname="$1"
+	echo -e "\textracting functions..."
+	if [ "$LIBTYPE" = "elf" ]; then
+		elf_functions "$libname"
+	elif [ "$LIBTYPE" = "macho" ]; then
+		macho_functions "$libname"
+	else
+		echo "E:"
+		echo "E: unsupported library type '$LIBTYPE'"
+		echo "E:"
+	fi
+}
 
 LIB_BASE=
 if [ "$LIBTYPE" = "elf" ]; then
@@ -381,12 +378,15 @@ if [ -z "${LIB}" -a -d "${LIBDIR}" ]; then
 	for l in "$ALL_LIBS"; do
 		echo "Processing '$l'..."
 		extract_syscalls "$l"
+		extract_functions "$l"
 		# use path relative to 'LIBDIR'
 		_l="${l#${LIBDIR}/}"
 		write_wrappers "${_l}" "${LIB_BASE}/${_l}"
 	done
 else
+	echo "Processing '$LIB'..."
 	extract_syscalls "$LIB"
+	extract_functions "$LIB"
 	write_wrappers "$LIB" "${LIB_BASE}/$(basename $LIB)"
 fi
 
