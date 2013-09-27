@@ -343,18 +343,20 @@ __EOF)
 
 function write_wrappers() {
 	local _libname="${OUTDIR}/$1/$(basename $1)"
-	local libname=
 	local dir=$(dirname "${_libname}")
+	local _libpath="$2"
+	local libname=
 	local fcn=
 	local num=
 	if [ "$LIBTYPE" = "elf" ]; then
 		libname=${_libname%.so}.S
+		LIBPATH=${_libpath%.so}_real.so
 	else
 		libname=${_libname%.dylib}.S
+		LIBPATH=${_libpath%.dylib}_real.S
 	fi
 
 	LIB="$(basename $1)"
-	LIBPATH="$2"
 	echo -e "\tcreating library project in '${dir}'..."
 	__setup_wrapped_lib "${dir}" "${libname}"
 
@@ -398,15 +400,27 @@ function should_wrap_android_elf() {
 	local fcn="$1"
 
 	__SHOULD_WRAP=1
+	if [ "$fcn" = ".plt" ]; then
+		__SHOULD_WRAP=0
+		return
+	fi
 	if [ "$fcn" = "atexit" ]; then
 		__SHOULD_WRAP=0
 		return
+	fi
+	if [ "$fcn" = "__libc_init" ]; then
+		__SHOULD_WRAP=0
+		return;
 	fi
 	if [ "$fcn" = "__stack_chk_fail" ]; then
 		__SHOULD_WRAP=0
 		return
 	fi
 	if [ "$fcn" = "getauxval" ]; then
+		__SHOULD_WRAP=0
+		return;
+	fi
+	if [ "$fcn" = "__errno" ]; then
 		__SHOULD_WRAP=0
 		return;
 	fi
@@ -444,11 +458,10 @@ function elf_functions() {
 				| $SED 's/.*<\([^>]*\)>:/\1/') )
 	FUNCTIONS=( )
 	FUNCTIONS_SEQ="$(seq 0 $((${#entries[@]}-1)))"
-	echo -e "\tsorting out syscall functions..."
+	echo -e "\tparsing function list..."
 	for idx in $FUNCTIONS_SEQ; do
 		fcn="${entries[$idx]}"
 		is_syscall "$fcn"
-		#should_wrap "$fcn"
 		should_wrap_${ARCH}_${LIBTYPE} "$fcn"
 		if [ $__FOUND_SYSCALL -eq 0 -a $__SHOULD_WRAP -eq 1 ]; then
 			FUNCTIONS+=( "$fcn" )

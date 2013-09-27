@@ -48,6 +48,8 @@
 
 #define LIBC_PATH "/system/lib/libc_real.so"
 
+extern "C" void wrapped_tracer(const char *symbol);
+
 abort_msg_t **__abort_message_ptr;
 Elf32_auxv_t *__libc_auxv = NULL;
 
@@ -56,10 +58,6 @@ Elf32_auxv_t *__libc_auxv = NULL;
 // From bionic/libc_init_common.cpp
 //
 // ------------------------------------------------------------------
-
-
-extern "C" unsigned __get_sp(void);
-extern "C" int __system_properties_init(void);
 
 // Not public, but well-known in the BSDs.
 const char* __progname;
@@ -93,14 +91,6 @@ void __libc_init_common(KernelArgumentBlock& args) {
 
   // AT_RANDOM is a pointer to 16 bytes of randomness on the stack.
   __stack_chk_guard = *reinterpret_cast<uintptr_t*>(getauxval(AT_RANDOM));
-
-  /*
-  // Get the main thread from TLS and add it to the thread list.
-  pthread_internal_t* main_thread = __get_thread();
-  main_thread->allocated_on_heap = false;
-  _pthread_internal_add(main_thread);
-  __system_properties_init(); // Requires 'environ'.
-  */
 }
 
 extern "C" {
@@ -115,6 +105,43 @@ extern "C" {
 //
 // ------------------------------------------------------------------
 
+// This function is called from the executable's _start entry point
+// (see arch-$ARCH/bionic/crtbegin_dynamic.S), which is itself
+// called by the dynamic linker after it has loaded all shared
+// libraries the executable depends on.
+//
+// Note that the dynamic linker has also run all constructors in the
+// executable at this point.
+__noreturn void __libc_init(void* raw_args,
+			    void (*onexit)(void),
+			    int (*slingshot)(int, char**, char**),
+			    structors_array_t const * const structors)
+{
+	void (*exit_f)(int status) = NULL;
+	void *libc_dso = dlopen(LIBC_PATH, RTLD_NOW | RTLD_LOCAL);
+	if (!libc_dso) {
+		*((volatile int *)0) = 1;
+	}
+	exit_f = (void (*)(int))dlsym(libc_dso, "exit");
+	if (!exit_f) {
+		*((volatile int *)0) = 1;
+	}
+
+	KernelArgumentBlock args(raw_args);
+
+	// Several Linux ABIs don't pass the onexit pointer, and the ones that
+	// do never use it.  Therefore, we ignore it.
+
+	// The executable may have its own destructors listed in its .fini_array
+	// so we need to ensure that these are called when the program exits
+	// normally.
+	if (structors->fini_array) {
+		__cxa_atexit(__libc_fini,structors->fini_array,NULL);
+	}
+
+	exit_f(slingshot(args.argc, args.argv, args.envp));
+}
+
 // We flag the __libc_preinit function as a constructor to ensure
 // that its address is listed in libc.so's .init_array section.
 // This ensures that the function is called by the dynamic linker
@@ -123,10 +150,6 @@ __attribute__((constructor)) static void __libc_preinit() {
   /*
    * load up the actual libc to call its constructor
    */
-  void *libc_dso = dlopen(LIBC_PATH, RTLD_NOW | RTLD_LOCAL);
-  if (!libc_dso)
-    return;
-
   // Read the kernel argument block pointer from TLS.
   void* tls = const_cast<void*>(__get_tls());
   KernelArgumentBlock** args_slot = &reinterpret_cast<KernelArgumentBlock**>(tls)[TLS_SLOT_BIONIC_PREINIT];
@@ -134,9 +157,15 @@ __attribute__((constructor)) static void __libc_preinit() {
 
   // Clear the slot so no other initializer sees its value.
   // __libc_init_common() will change the TLS area so the old one won't be accessible anyway.
-  *args_slot = NULL;
+  //*args_slot = NULL;
+
+  void *libc_dso = dlopen(LIBC_PATH, RTLD_NOW | RTLD_LOCAL);
+  if (!libc_dso)
+    return;
+  wrapped_tracer("__libc_preinit:start");
 
   __libc_init_common(*args);
+  wrapped_tracer("__libc_preinit:end");
 
   // Hooks for the debug malloc and pthread libraries to let them know that we're starting up.
   // pthread_debug_init();

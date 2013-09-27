@@ -3,12 +3,14 @@
  */
 #include <ctype.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
 #include "ctype_private.h"
 #include "local.h"
+#include "bionic_tls.h"
 
 /* TODO: connect this... */
 int __isthreaded = 1;
@@ -176,3 +178,34 @@ const short _C_tolower_[1 + CTYPE_NUM_CHARS] = {
 };
 
 const short *_tolower_tab_ = _C_tolower_;
+
+
+/* -------------------------------------------------------------------
+ *
+ * From bionic/signame.c
+ *
+ */
+const char * const sys_signame[NSIG] = {
+#define  __BIONIC_SIGDEF(x,y,z)   [ SIG##x ] = #x,
+#include <sys/_sigdefs.h>
+};
+
+/* -------------------------------------------------------------------
+ *
+ * From bionic/siglist.c
+ *
+ */
+const char * const sys_siglist[NSIG] = {
+#define  __BIONIC_SIGDEF(x,y,z)   [ SIG##x ] = z,
+#include <sys/_sigdefs.h>
+};
+
+/* -------------------------------------------------------------------
+ *
+ * From bionic/__errno.c
+ *
+ */
+volatile int*  __errno( void )
+{
+  return  &((volatile int*)__get_tls())[TLS_SLOT_ERRNO];
+}

@@ -55,18 +55,11 @@
 #define _amarg(arg,pos)			#arg
 #define _FN(x) concat(,x)
 #define ENTRY(x) \
-	.text; .align 4; .globl _FN(x); .type s,%function; _FN(x): .fnstart
+	.text; .align 4; .globl _FN(x); .type _FN(x),#function; _FN(x): .fnstart
 #define FUNC_LBL(x) \
-	.text; .align 4; .globl _FN(x);  _FN(x):
+	.text; .align 4; .globl _FN(x); .type _FN(x),#function; _FN(x):
 #define END(x) \
 	.fnend; .size _FN(x), .-_FN(x)
-
-        .macro  .funtype symbol
-        .type  \symbol, %function
-        .endm
-	.macro .const_data
-	.section rodata
-	.endm
 #endif
 /* End Apple compatibility macros */
 
@@ -76,8 +69,8 @@
  */
 	/* .macro wrap_lib  $0 = libname, $1 = path */
 	MACRO2(wrap_lib, libname, path)
+	.section bss
 	.align 4
-	.const_data
 	.globl marg(__libhandle_,\libname,$0)
 marg(__libhandle_,\libname,$0):
 	.word 0
@@ -93,14 +86,13 @@ marg(__wraplib_path_,\libname,$0):
 	.asciz _amarg(\path,$1)
 	.endm
 
-
 /*
- * @symadddr - grab the address of a symbol using PC-relative addressing
+ * @symaddr - grab the address of a symbol using PC-relative addressing
  *
  * This annoying little macro is needed because Apple's assembler doesn't
  * do handy things like this for you... grrrrr.
  */
- 	MACRO2(symaddr, reg, symname) /* $0 = reg, $1 = symname */
+	MACRO2(symaddr, reg, symname) /* $0 = reg, $1 = symname */
 	movw	_marg(\reg,$0), #:lower16:(_marg(\symname,$1) - . - 16)
 	movt	_marg(\reg,$0), #:upper16:(_marg(\symname,$1) - . - 12)
 	add	_marg(\reg,$0), pc
@@ -116,7 +108,7 @@ marg(__wraplib_path_,\libname,$0):
  *
  * TODO: set the frame pointer properly for easier debugging...
  */
-	MACRO1(save_caller_state, reg) /* $0 = rptr */
+	MACRO1(save_caller_state, reg) /* $0 = reg */
 	push	{lr}
 	add	lr, sp, #4	/* lr points to stack at time of func entry */
 	push	{r0-r12}
@@ -128,7 +120,7 @@ marg(__wraplib_path_,\libname,$0):
 	stmdb	sp!, {r1-r8}
 	ldr	_marg(\reg,$0), [lr]	/* get top of orig stack! (extra 4 bytes) */
 	stmdb	sp!, {_marg(\reg,$0)}
-	sub	_marg(\reg,$0), lr, #(4 + (13 * 4)) /* \rptr = saved r0 (13 regs + lr) */
+	sub	_marg(\reg,$0), lr, #(4 + (13 * 4)) /* \reg = saved r0 (13 regs + lr) */
 	.endm /* save_caller_state */
 
 
@@ -138,7 +130,7 @@ marg(__wraplib_path_,\libname,$0):
  * TODO: restore the frame pointer
  */
 	MACRO1(restore_caller_state, reg) /* $0 = rptr */
-	mov	sp, _marg(\reg,$0)
+	mov	sp, _marg(\reg,$0) /* jumps over all saved stack space */
 	pop	{r0-r12} /* overwrites \rptr! */
 	pop	{lr}
 	.endm
@@ -168,12 +160,11 @@ FUNC_LBL(_marg(\pfx,$1)_marg(\sym,$0))
  * the ELF library directly.
  */
 	MACRO3(wrap_func_start, wraplib, wrapsym, pfx)
-	.const_data
+	.section bss
 	.align 4
 marg(__wrapstr_,\wrapsym,$1):
 	.asciz _amarg(\wrapsym,$1)
 
-	.const_data
 	.align 4
 marg(__wrapsym_,\wrapsym,$1):
 	.word 0
@@ -229,12 +220,11 @@ END(_marg(\pfx,$2)_marg(\wrapsym,$1))
  *              same name in a different library
  */
 	MACRO2(pass_func_start, wraplib, wrapsym)
-	.const_data
+	.section bss
 	.align 4
 marg(__wrapstr_,\wrapsym,$1):
 	.asciz _amarg(\wrapsym,$1)
 
-	.const_data
 	.align 4
 marg(__wrapsym_,\wrapsym,$1):
 	.word 0
@@ -242,9 +232,10 @@ marg(__wrapsym_,\wrapsym,$1):
 
 	MACRO2(pass_func_end, wraplib, wrapsym)
 ENTRY(_marg(\wrapsym,$1))
-	mov     ip, sp
-	.save   {r0, r1, r2, r3, r4, r5, r6, r7, r11}
-	stmfd   sp!, {r0, r1, r2, r3, r4, r5, r6, r7, r11}
+	mov	ip, sp
+	.save	{r0-r7, r10, r11}
+	stmfd	sp!, {r0-r7, r10, r11}
+	mov	r10, ip
 
 	/* lookup wrapped func address */
 	symaddr	r11, marg(__wrapsym_,\wrapsym,$1)
@@ -262,15 +253,16 @@ ENTRY(_marg(\wrapsym,$1))
 	mov	r11, r0
 1:
 	/* restore registers and make the original function call */
+	/* NOTE: stack pointer is not in the correct place!! */
 	ldmfd   ip, {r0, r1, r2, r3, r4, r5, r6}
 	blx	r11
 
 	/* save the possible return values in r0-r3 */
-	stmia	ip, {r0-r3}	/* overwrite r0-r3 on the stored orig regs */
+	stmia	r10, {r0-r3}	/* overwrite r0-r3 on the stored orig regs */
 
 	/* restore stack and register state (including function return value) */
 2:	
-	ldmfd   sp!, {r0, r1, r2, r3, r4, r5, r6, r7, r11}
+	ldmfd   sp!, {r0, r1, r2, r3, r4, r5, r6, r7, r10, r11}
 	bx	lr
 END(_marg(\wrapsym,$1))
 	.endm
