@@ -18,10 +18,13 @@ OBJDUMP_PFX=${CROSS_COMPILE:-arm-eabi-}
 
 FILE=`which file`
 OTOOL=`which otool`
+SED=`which gsed`
 ELF_OBJDUMP=`which ${OBJDUMP_PFX}objdump`
 
-ELF_SYSCALL_EXTRACT="${CDIR}/elf_syscalls.pl"
-MACHO_SYSCALL_EXTRACT="${CDIR}/macho_syscalls.pl"
+if [ -z "$SED" ]; then
+	# hope for the best...
+	SED=sed
+fi
 
 if [ -z "$FILE" ]; then
 	echo "WARNING: Can't find 'file' utility be sure to specify the library type!"
@@ -33,29 +36,18 @@ LIB=
 LIBDIR=
 LIBTYPE=
 LIBPATH=
-RETTYPE=uint64_t
-PARAM_TYPE=uint32_t
 OUTDIR=.
-declare -a ENTRY_POINTS=( )
 
 function usage() {
 	echo -e "Usage: $0 --lib path/to/library "
 	echo -e "                          [--arch {arm|x86}]"
 	echo -e "                          [--type {elf|macho}]"
-	echo -e "                          [--rettype {c-type}]"
-	echo -e "                          [--paramtype {c-type}]"
 	echo -e "                          [--out path/to/output/dir]"
 	echo -e ""
 	echo -e "\t--arch {android|arm|x86}        Architecture for syscall wrappers"
 	echo -e "\t--lib path/to/library           Library (or directory of libraries) to search for syscalls"
 	echo -e ""
 	echo -e "\t--type {elf|macho}              Specify the type of input library (avoid auto-detection)"
-	echo -e ""
-	echo -e "\t--rettype {c-type}              Specify the type of output returned by each wrapper function"
-	echo -e "\t                                default: uint64_t"
-	echo -e ""
-	echo -e "\t--paramtype {c-type}            Specify the type of each input passed to each wrapper function"
-	echo -e "\t                                default: uint32_t"
 	echo -e ""
 	echo -e "\t--out output/dir                Directory to put output C wrappers (defaults to .)"
 	echo -e ""
@@ -100,16 +92,6 @@ while [[ ! -z "$1" ]]; do
 			;;
 		--type )
 			LIBTYPE=$2
-			shift
-			shift
-			;;
-		--rettype )
-			RETTYPE=$2
-			shift
-			shift
-			;;
-		--paramtype )
-			PARAM_TYPE=$2
 			shift
 			shift
 			;;
@@ -168,7 +150,11 @@ fi
 
 
 declare -a SYSCALLS=( )
+SYSCALLS_SEQ=
 declare -a FUNCTIONS=( )
+declare -a DUP_SYMS=( )
+declare -a DUP_SYM_SEQ_A=( )
+DUP_SYMS_SEQ=
 
 #
 # Locate all syscalls in a given library
@@ -191,14 +177,100 @@ function extract_syscalls() {
 		echo "E:"
 		exit 1
 	fi
+	SYSCALLS_SEQ="$(seq 0 $((${#SYSCALLS[@]}-1)))"
 }
+
+function find_dup_elf_symbols() {
+	local lib="$1"
+	local tmpfile="${CDIR}/.$$.$RANDOM.tmp"
+	local RE_line='^([0-9a-f]{1,8})[[:space:]]+g.*\.text[[:space:]]+[0-9a-f]{8}[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]+)$'
+	local prev_addr=
+	local addr=
+	local prev_func=
+	local func=
+	echo -e -n "\tfinding duplicate symbols..."
+	declare -a syms=( )
+
+	sym_idx=0
+	${ELF_OBJDUMP} -T "$lib" | grep ' g ' | grep .text | sort > "$tmpfile"
+	while read -r line; do
+		if [[ $line =~ $RE_line ]]; then
+			addr="${BASH_REMATCH[1]}"
+			func="${BASH_REMATCH[2]}"
+			if [ "$addr" = "$prev_addr" ]; then
+				syms+=( $func )
+				#echo -n -e ",$func"
+			else
+				prev_addr=$addr
+				prev_func=$func
+				if [ ${#syms[@]} -gt 1 ]; then
+					DUP_SYMS[$sym_idx]="${syms[@]}"
+					DUP_SYM_SEQ_A[$sym_idx]="$(seq 0 $((${#syms[@]}-1)))"
+					sym_idx=$(($sym_idx + 1))
+				fi
+				syms=( $func )
+			fi
+		fi
+	done < "$tmpfile"
+	if [ ${#syms[@]} -gt 1 ]; then
+		${DUP_SYMS[$sym_idx]}=$syms
+		sym_idx=$(($sym_idx + 1))
+	fi
+	rm -f "$tmpfile"
+	echo "${#DUP_SYMS[@]}"
+	DUP_SYMS_SEQ="$(seq 0 $((${#DUP_SYMS[@]}-1)))"
+}
+
+__line_len=0
+function write_sym() {
+	local _type="$1"
+	local _lib="$2"
+	local _fcn="$3"
+	local _dst="$4"
+	local _dup=0
+	declare -a syms=( )
+
+	for ii in $DUP_SYMS_SEQ; do
+		syms=( ${DUP_SYMS[$ii]} )
+		for s in ${DUP_SYM_SEQ_A[$ii]}; do
+			if [ "${syms[$s]}" = "${_fcn}" ]; then
+				_dup=1
+				break;
+			fi
+		done
+		if [ $_dup -gt 0 ]; then
+			break;
+		fi
+	done
+
+	if [ $_dup -gt 0 ]; then
+		echo "${_type}_START(${_lib}, ${_fcn})" >> "${_dst}"
+		echo -n "${#syms[@]}."
+		__line_len=$(($__line_len + 2))
+		for sym in "${syms[@]}"; do
+			if [ "${sym}" != "${_fcn}" ]; then
+				echo "FUNC(${sym})" >> "${_dst}"
+			fi
+		done
+		echo "${_type}_END(${_lib}, ${_fcn})" >> "${_dst}"
+	else
+		echo -n "."
+		__line_len=$(($__line_len + 1))
+		echo "${_type}_FUNC(${_lib}, ${_fcn})" >> "${_dst}"
+	fi
+
+	if [ $__line_len -gt 80 ]; then
+		echo -e -n "\n\t                             "
+		__line_len=40
+	fi
+}
+
 
 #
 # Start the output file
 #
 FILE_HEADER=
 FILE_FOOTER=
-
 function __setup_wrapped_lib() {
 	local dir="$1"
 	local asm="$2"
@@ -230,8 +302,11 @@ __EOF)
 LOCAL_PATH := \$(call my-dir)
 include \$(CLEAR_VARS)
 LOCAL_CFLAGS := -std=gnu99 -DPTHREAD_DEBUG -DPTHREAD_DEBUG_ENABLED=0 \\
-		-DCRT_LEGACY_WORKAROUND
-LOCAL_ASFLAGS += -I\$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include
+		-DCRT_LEGACY_WORKAROUND -D_LIBC=1 \\
+		-DHAVE_ARM_TLS_REGISTER -DANDROID_SMP=1
+LOCAL_C_INCLUDE := \$(LOCAL_PATH)/platform/android/arm/include
+LOCAL_ASFLAGS += -I\$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include \\
+		-I\$(LOCAL_PATH)/platform/android/arm/include
 LOCAL_SRC_FILES := \\
 		$(basename "$asm") \\
 		wrap_lib.c
@@ -239,25 +314,32 @@ LOCAL_NO_CRT := true
 LOCAL_SRC_FILES := \\
 		platform/android/crtbegin_so.c \\
 		platform/android/atexit_legacy.c \\
+		platform/android/libc_glue.c \\
+		platform/android/getopt_long.c \\
+		platform/android/libc_init.cpp \\
 		\$(LOCAL_SRC_FILES) \\
+		platform/android/__stack_chk_fail.cpp \\
 		platform/android/\$(TARGET_ARCH)/crtend_so.S
 LOCAL_MODULE:= ${module_name}
 LOCAL_ADDITIONAL_DEPENDENCIES := \$(LOCAL_PATH)/Android.mk
 # should _only_ depend on libdl - anything else will cause problems!
 LOCAL_SHARED_LIBRARIES := libdl
+LOCAL_WHOLE_STATIC_LIBRARIES :=
+LOCAL_SYSTEM_SHARED_LIBRARIES :=
 include \$(BUILD_SHARED_LIBRARY)
 __EOF)
 
 	mkdir -p "$dir" 2>/dev/null
-	ln -s "${CDIR}/wrap_lib.c" "${dir}"
-	ln -s "${CDIR}/wrap_lib.h" "${dir}"
-	ln -s "${CDIR}/arch" "${dir}"
-	ln -s "${CDIR}/platform" "${dir}"
+	ln -s "${CDIR}/wrap_lib.c" "${dir}" 2>/dev/null
+	ln -s "${CDIR}/wrap_lib.h" "${dir}" 2>/dev/null
+	ln -s "${CDIR}/arch" "${dir}" 2>/dev/null
+	ln -s "${CDIR}/platform" "${dir}" 2>/dev/null
 	echo "${ANDROID_MK}" > "${dir}/Android.mk"
 
 	# start the ASM file
 	echo "${FILE_HEADER}" > "${asm}"
 }
+
 
 function write_wrappers() {
 	local _libname="${OUTDIR}/$1/$(basename $1)"
@@ -276,19 +358,23 @@ function write_wrappers() {
 	echo -e "\tcreating library project in '${dir}'..."
 	__setup_wrapped_lib "${dir}" "${libname}"
 
-	echo -e "\twriting ${#SYSCALLS[@]} syscall wrappers..."
+	echo -e -n "\twriting ${#SYSCALLS[@]} syscall wrappers"
+	__line_len=40
 	for sc in "${SYSCALLS[@]}"; do
 		fcn=${sc#*:}
 		num=${sc%:*}
-		echo "WRAP_FUNC(${LIB}, ${fcn})" >> "${libname}"
+		write_sym "WRAP" "${LIB}" "${fcn}" "${libname}"
 	done
+	echo ""
 
 	echo "" >> "${libname}"
 
-	echo -e "\twriting ${#FUNCTIONS[@]} function wrappers..."
+	echo -e -n "\twriting ${#FUNCTIONS[@]} function wrappers"
+	__line_len=40
 	for e in "${FUNCTIONS[@]}"; do
-		echo "PASS_FUNC(${LIB}, $e)" >> "${libname}"
+		write_sym "PASS" "${LIB}" "${e}" "${libname}"
 	done
+	echo ""
 
 	echo "${FILE_FOOTER}" >> "${libname}"
 }
@@ -296,10 +382,37 @@ function write_wrappers() {
 __FOUND_SYSCALL=0
 function is_syscall() {
 	local funcname="$1"
-	local _found=$(echo "${SYSCALLS[@]}" | grep -v grep | grep "\<${funcname}\>")
+	local sc=
 	__FOUND_SYSCALL=0
-	if [ ! -z "$_found" ]; then
-		__FOUND_SYSCALL=1
+	for s in $SYSCALLS_SEQ; do
+		sc=${SYSCALLS[$s]#*:}
+		if [ "$sc" = "$funcname" ]; then
+			__FOUND_SYSCALL=1
+			return
+		fi
+	done
+}
+
+__SHOULD_WRAP=0
+function should_wrap_android_elf() {
+	local fcn="$1"
+
+	__SHOULD_WRAP=1
+	if [ "$fcn" = "atexit" ]; then
+		__SHOULD_WRAP=0
+		return
+	fi
+	if [ "$fcn" = "__stack_chk_fail" ]; then
+		__SHOULD_WRAP=0
+		return
+	fi
+	if [ "$fcn" = "getauxval" ]; then
+		__SHOULD_WRAP=0
+		return;
+	fi
+	if [ "${fcn:0:6}" = "getopt" ]; then
+		__SHOULD_WRAP=0
+		return;
 	fi
 }
 
@@ -309,7 +422,7 @@ function is_syscall() {
 function macho_functions() {
 	local dylib="$1"
 	local entries=( $(${OTOOL} -tv "$dylib" | grep '^[^[]*:\s*$' \
-				| grep -v "$dylib" | sed 's/:[ ]*//g') )
+				| grep -v "$dylib" | $SED 's/:[ ]*//g') )
 	FUNCTIONS=( )
 	for idx in $(seq 0 $((${#entries[@]}-1))); do
 		is_syscall "${entries[$idx]}"
@@ -328,18 +441,21 @@ function elf_functions() {
 	local fcn=
 	local entries=( $(${ELF_OBJDUMP} -d "${lib}" \
 				| grep '^[0-9a-f][0-9a-f]* <[^>][^>]*>:' \
-				| sed 's/.*<\([^>]*\)>:/\1/') )
+				| $SED 's/.*<\([^>]*\)>:/\1/') )
 	FUNCTIONS=( )
-	for idx in $(seq 0 $((${#entries[@]}-1))); do
+	FUNCTIONS_SEQ="$(seq 0 $((${#entries[@]}-1)))"
+	echo -e "\tsorting out syscall functions..."
+	for idx in $FUNCTIONS_SEQ; do
 		fcn="${entries[$idx]}"
 		is_syscall "$fcn"
-		if [ $__FOUND_SYSCALL -eq 0 ]; then
-			if [ "$fcn" != "atexit" ]; then
-				FUNCTIONS+=( "$fcn" )
-			fi
+		#should_wrap "$fcn"
+		should_wrap_${ARCH}_${LIBTYPE} "$fcn"
+		if [ $__FOUND_SYSCALL -eq 0 -a $__SHOULD_WRAP -eq 1 ]; then
+			FUNCTIONS+=( "$fcn" )
 		fi
 	done
 	echo -e "\t    (found ${#entries[@]} ELF entry points, ${#FUNCTIONS[@]} non-syscall)"
+	find_dup_elf_symbols "$lib"
 }
 
 function extract_functions() {

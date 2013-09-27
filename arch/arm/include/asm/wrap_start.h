@@ -14,16 +14,40 @@
 
 #include "wrap.S"
 
+#define FUNC_START(TYPE, LIBNM, NAME,...) \
+	TYPE ## _func_start LIBNM, NAME, ## __VA_ARGS__
+
+#define FUNC_END(TYPE, LIBNM, NAME,...) \
+	TYPE ## _func_end LIBNM, NAME, ## __VA_ARGS__
+
+#define FUNC(NAME,...) \
+	func_entry NAME, ## __VA_ARGS__
+
 #define WRAP_LIB(LIBNM, LIBPATH) \
 	wrap_lib LIBNM, LIBPATH
 
-#define WRAP_FUNC(LIBNM, FUNC) \
-	wrap_func LIBNM, FUNC
+#define WRAP_FUNC(LIBNM, NAME) \
+	FUNC_START(wrap, LIBNM, NAME); \
+	FUNC_END(wrap, LIBNM, NAME)
 
-#define CUSTOM_WRAP_FUNC(LIBNM, FUNC, PREFIX) \
-	wrap_func LIBNM, FUNC, PREFIX
+#define WRAP_START(LIBNM, NAME) \
+	FUNC_START(wrap, LIBNM, NAME)
 
-#define PASS_FUNC(LIBNM, FUNC) \
-	pass_func LIBNM, FUNC
+#define WRAP_END(LIBNM, NAME) \
+	FUNC_END(wrap, LIBNM, NAME)
+
+#define CUSTOM_WRAP_FUNC(LIBNM, NAME, PREFIX) \
+	FUNC_START(wrap, LIBNM, NAME, PREFIX); \
+	FUNC_END(wrap, LIBNM, NAME, PREFIX)
+
+#define PASS_FUNC(LIBNM, NAME) \
+	FUNC_START(pass, LIBNM, NAME); \
+	FUNC_END(pass, LIBNM, NAME)
+
+#define PASS_START(LIBNM, NAME) \
+	FUNC_START(pass, LIBNM, NAME)
+
+#define PASS_END(LIBNM, NAME) \
+	FUNC_END(pass, LIBNM, NAME)
 
 #endif /* WRAP_START_H */

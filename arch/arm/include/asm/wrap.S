@@ -23,9 +23,11 @@
 #define marg(x,arg,pos)			concat(x,pos)
 #define _marg(arg,pos)			pos
 #define _amarg(arg,pos)			#pos
-#define FUNC(x) concat(_,x)
+#define _FN(x) concat(_,x)
 #define ENTRY(x) \
-	.text; .align 4; .globl FUNC(x);  FUNC(x):
+	.text; .align 4; .globl _FN(x);  _FN(x):
+#define FUNC_LBL(x) \
+	.text; .align 4; .globl _FN(x);  _FN(x):
 #define END(x)
 #if defined(MODEL_armv6)
         .machine  armv6
@@ -51,11 +53,13 @@
 #define marg(x,arg,pos)			concat(x,arg)
 #define _marg(arg,pos)			arg
 #define _amarg(arg,pos)			#arg
-#define FUNC(x) concat(,x)
+#define _FN(x) concat(,x)
 #define ENTRY(x) \
-	.text; .align 4; .globl FUNC(x); .type s,%function; FUNC(x): .fnstart
+	.text; .align 4; .globl _FN(x); .type s,%function; _FN(x): .fnstart
+#define FUNC_LBL(x) \
+	.text; .align 4; .globl _FN(x);  _FN(x):
 #define END(x) \
-	.fnend; .size FUNC(x), .-FUNC(x)
+	.fnend; .size _FN(x), .-_FN(x)
 
         .macro  .funtype symbol
         .type  \symbol, %function
@@ -147,6 +151,13 @@ marg(__wraplib_path_,\libname,$0):
 	.endm
 
 /*
+ * @func_entry - output the start of a function
+ */
+	MACRO2(func_entry, sym, pfx)
+FUNC_LBL(_marg(\pfx,$1)_marg(\sym,$0))
+	.endm
+	
+/*
  * @wrap_func - Create a wrapper entry point for a given symbol
  *
  * Given a symbol, "symname", this macro will create an entry point named
@@ -156,7 +167,7 @@ marg(__wraplib_path_,\libname,$0):
  * should be able to invoke "elf_symname" exactly as if calling "symname" in
  * the ELF library directly.
  */
-	MACRO3(wrap_func, wraplib, wrapsym, pfx)
+	MACRO3(wrap_func_start, wraplib, wrapsym, pfx)
 	.const_data
 	.align 4
 marg(__wrapstr_,\wrapsym,$1):
@@ -166,7 +177,9 @@ marg(__wrapstr_,\wrapsym,$1):
 	.align 4
 marg(__wrapsym_,\wrapsym,$1):
 	.word 0
+	.endm
 
+	MACRO3(wrap_func_end, wraplib, wrapsym, pfx)
 ENTRY(_marg(\pfx,$2)_marg(\wrapsym,$1))
 	/* save caller args, put pointer to r0 (on stack) in r10 */
 	save_caller_state r10	
@@ -179,7 +192,7 @@ ENTRY(_marg(\pfx,$2)_marg(\wrapsym,$1))
 	symaddr	r0, marg(__wraplib_path_,\wraplib,$0)
 	symaddr	r1, marg(__libhandle_,\wraplib,$0)
 	symaddr	r2, marg(__wrapstr_,\wrapsym,$1)
-	blx	FUNC(wrapped_dlsym)
+	blx	_FN(wrapped_dlsym)
 	cmp	r0, #0
 	beq	2f
 	symaddr	r11, marg(__wrapsym_,\wrapsym,$1)
@@ -189,7 +202,7 @@ ENTRY(_marg(\pfx,$2)_marg(\wrapsym,$1))
 	/* call any defined "tracing" function */
 #ifdef WRAP_TRACE_FUNC
 	symaddr r0, marg(__wrapstr_,\wrapsym,$1)
-	blx	FUNC(WRAP_TRACE_FUNC)
+	blx	_FN(WRAP_TRACE_FUNC)
 #endif
 	/* restore registers and make the original function call */
 	ldmia	r10, {r0-r3}
@@ -203,7 +216,7 @@ ENTRY(_marg(\pfx,$2)_marg(\wrapsym,$1))
 	mov	r2, r1
 	mov	r1, r0
 	symaddr r0, marg(__wrapstr_,\wrapsym,$1)
-	blx	FUNC(WRAP_POSTLUDE)
+	blx	_FN(WRAP_POSTLUDE)
 #endif
 	/* restore stack and register state (including function return value) */
 2:	restore_caller_state r10
@@ -215,7 +228,7 @@ END(_marg(\pfx,$2)_marg(\wrapsym,$1))
  * @pass_func - Create an entry point that calls an entry point with the
  *              same name in a different library
  */
-	MACRO2(pass_func, wraplib, wrapsym)
+	MACRO2(pass_func_start, wraplib, wrapsym)
 	.const_data
 	.align 4
 marg(__wrapstr_,\wrapsym,$1):
@@ -225,7 +238,9 @@ marg(__wrapstr_,\wrapsym,$1):
 	.align 4
 marg(__wrapsym_,\wrapsym,$1):
 	.word 0
+	.endm
 
+	MACRO2(pass_func_end, wraplib, wrapsym)
 ENTRY(_marg(\wrapsym,$1))
 	mov     ip, sp
 	.save   {r0, r1, r2, r3, r4, r5, r6, r7, r11}
@@ -239,7 +254,7 @@ ENTRY(_marg(\wrapsym,$1))
 	symaddr	r0, marg(__wraplib_path_,\wraplib,$0)
 	symaddr	r1, marg(__libhandle_,\wraplib,$0)
 	symaddr	r2, marg(__wrapstr_,\wrapsym,$1)
-	blx	FUNC(wrapped_dlsym)
+	blx	_FN(wrapped_dlsym)
 	cmp	r0, #0
 	beq	2f
 	symaddr	r11, marg(__wrapsym_,\wrapsym,$1)
