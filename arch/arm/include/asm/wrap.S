@@ -29,6 +29,8 @@
 #define FUNC_LBL(x) \
 	.text; .align 4; .globl _FN(x);  _FN(x):
 #define END(x)
+#define STRING(nm, val) \
+	.text; .globl nm; nm: .asciz val
 #if defined(MODEL_armv6)
         .machine  armv6
         .macro  cbz
@@ -55,11 +57,14 @@
 #define _amarg(arg,pos)			#arg
 #define _FN(x) concat(,x)
 #define ENTRY(x) \
-	.text; .align 4; .globl _FN(x); .type _FN(x),#function; _FN(x): .fnstart
+	.text; .align 4; .globl _FN(x); .type _FN(x),#function; .arm; _FN(x):
+	/* .text; .align 4; .globl _FN(x); .type _FN(x),#function; _FN(x): .fnstart */
 #define FUNC_LBL(x) \
 	.text; .align 4; .globl _FN(x); .type _FN(x),#function; _FN(x):
-#define END(x) \
-	.fnend; .size _FN(x), .-_FN(x)
+#define END(x)
+	/* .fnend; .size _FN(x), .-_FN(x) */
+#define STRING(nm, val) \
+	.text; .globl nm; nm: .asciz val
 #endif
 /* End Apple compatibility macros */
 
@@ -69,21 +74,13 @@
  */
 	/* .macro wrap_lib  $0 = libname, $1 = path */
 	MACRO2(wrap_lib, libname, path)
-	.section bss
+	.bss
 	.align 4
 	.globl marg(__libhandle_,\libname,$0)
 marg(__libhandle_,\libname,$0):
 	.word 0
-
-	.align 4
-	.globl marg(__wraplib_str_,\libname,$0)
-marg(__wraplib_str_,\libname,$0):
-	.asciz _amarg(\libname,$0)
-
-	.align 4
-	.globl marg(__wraplib_path_,\libname,$0)
-marg(__wraplib_path_,\libname,$0):
-	.asciz _amarg(\path,$1)
+STRING(marg(__wraplib_str_,\libname,$0), _amarg(\libname,$0))
+STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
 	.endm
 
 /*
@@ -160,15 +157,13 @@ FUNC_LBL(_marg(\pfx,$1)_marg(\sym,$0))
  * the ELF library directly.
  */
 	MACRO3(wrap_func_start, wraplib, wrapsym, pfx)
-	.section bss
-	.align 4
-marg(__wrapstr_,\wrapsym,$1):
-	.asciz _amarg(\wrapsym,$1)
-
+	.bss
 	.align 4
 marg(__wrapsym_,\wrapsym,$1):
 	.word 0
+STRING(marg(__wrapstr_,\wrapsym,$1), _amarg(\wrapsym,$1))
 	.endm
+
 
 	MACRO3(wrap_func_end, wraplib, wrapsym, pfx)
 ENTRY(_marg(\pfx,$2)_marg(\wrapsym,$1))
@@ -220,22 +215,16 @@ END(_marg(\pfx,$2)_marg(\wrapsym,$1))
  *              same name in a different library
  */
 	MACRO2(pass_func_start, wraplib, wrapsym)
-	.section bss
-	.align 4
-marg(__wrapstr_,\wrapsym,$1):
-	.asciz _amarg(\wrapsym,$1)
-
+	.bss
 	.align 4
 marg(__wrapsym_,\wrapsym,$1):
 	.word 0
+STRING(marg(__wrapstr_,\wrapsym,$1), _amarg(\wrapsym,$1))
 	.endm
 
 	MACRO2(pass_func_end, wraplib, wrapsym)
 ENTRY(_marg(\wrapsym,$1))
-	mov	ip, sp
-	.save	{r0-r7, r10, r11}
-	stmfd	sp!, {r0-r7, r10, r11}
-	mov	r10, ip
+	save_caller_state r10
 
 	/* lookup wrapped func address */
 	symaddr	r11, marg(__wrapsym_,\wrapsym,$1)
@@ -253,16 +242,14 @@ ENTRY(_marg(\wrapsym,$1))
 	mov	r11, r0
 1:
 	/* restore registers and make the original function call */
-	/* NOTE: stack pointer is not in the correct place!! */
-	ldmfd   ip, {r0, r1, r2, r3, r4, r5, r6}
+	ldmia	r10, {r0-r3}
 	blx	r11
-
 	/* save the possible return values in r0-r3 */
 	stmia	r10, {r0-r3}	/* overwrite r0-r3 on the stored orig regs */
 
+2:
 	/* restore stack and register state (including function return value) */
-2:	
-	ldmfd   sp!, {r0, r1, r2, r3, r4, r5, r6, r7, r10, r11}
+	restore_caller_state r10
 	bx	lr
 END(_marg(\wrapsym,$1))
 	.endm

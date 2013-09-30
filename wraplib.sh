@@ -301,11 +301,14 @@ __EOF)
 	ANDROID_MK=$(cat -<<__EOF
 LOCAL_PATH := \$(call my-dir)
 include \$(CLEAR_VARS)
-LOCAL_CFLAGS := -std=gnu99 -DPTHREAD_DEBUG -DPTHREAD_DEBUG_ENABLED=0 \\
+common_cflags := -fPIC -DPTHREAD_DEBUG -DPTHREAD_DEBUG_ENABLED=0 \\
 		-DCRT_LEGACY_WORKAROUND -D_LIBC=1 \\
-		-DHAVE_ARM_TLS_REGISTER -DANDROID_SMP=1
+		-DHAVE_ARM_TLS_REGISTER -DANDROID_SMP=1 \\
+		-fno-stack-protector
+LOCAL_CFLAGS := \$(common_cflags) -std=gnu99
+LOCAL_CPPFLAGS := \$(common_cflags)
 LOCAL_C_INCLUDE := \$(LOCAL_PATH)/platform/android/arm/include
-LOCAL_ASFLAGS += -I\$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include \\
+LOCAL_ASFLAGS += -fPIC -I\$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include \\
 		-I\$(LOCAL_PATH)/platform/android/arm/include
 LOCAL_SRC_FILES := \\
 		$(basename "$asm") \\
