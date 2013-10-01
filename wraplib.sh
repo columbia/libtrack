@@ -32,6 +32,7 @@ fi
 
 ARCH=android
 
+WRAPALL=0
 LIB=
 LIBDIR=
 LIBTYPE=
@@ -40,10 +41,12 @@ OUTDIR=.
 
 function usage() {
 	echo -e "Usage: $0 --lib path/to/library "
-	echo -e "                          [--arch {arm|x86}]"
+	echo -e "                          [--wrap-all]"
+	echo -e "                          [--arch {android|arm|x86}]"
 	echo -e "                          [--type {elf|macho}]"
 	echo -e "                          [--out path/to/output/dir]"
 	echo -e ""
+	echo -e "\t--wrap-all                      Wrap (trace) all functions in the library"
 	echo -e "\t--arch {android|arm|x86}        Architecture for syscall wrappers"
 	echo -e "\t--lib path/to/library           Library (or directory of libraries) to search for syscalls"
 	echo -e ""
@@ -64,6 +67,10 @@ while [[ ! -z "$1" ]]; do
 	case "$1" in
 		-h | --help )
 			usage
+			;;
+		--wrap-all )
+			WRAPALL=1
+			shift
 			;;
 		--arch )
 			if [ "$2" != "android" ]; then
@@ -148,13 +155,28 @@ elif [ "$LIBTYPE" = "elf" ]; then
 	fi
 fi
 
-
+tf_syscalls=
+tf_code=
 declare -a SYSCALLS=( )
 SYSCALLS_SEQ=
 declare -a FUNCTIONS=( )
 declare -a DUP_SYMS=( )
 declare -a DUP_SYM_SEQ_A=( )
 DUP_SYMS_SEQ=
+
+function extract_code() {
+	echo -e "\tdisassembling..."
+	if [ "$LIBTYPE" = "elf" ]; then
+		${ELF_OBJDUMP} -d "$1" > "$tf_code"
+	elif [ "$LIBTYPE" = "macho" ]; then
+		${OTOOL} -tv "$1" > "$tf_code"
+	else
+		echo "E:"
+		echo "E: unsupported lib type:'$LIBTYPE'"
+		echo "E:"
+		exit 1
+	fi
+}
 
 #
 # Locate all syscalls in a given library
@@ -167,16 +189,25 @@ function extract_syscalls() {
 		echo "E: missing syscall extraction perl script: '$extract_pl'"
 		echo "E:"
 	fi
-	if [ "$LIBTYPE" = "elf" ]; then
-		SYSCALLS=( $(${ELF_OBJDUMP} -d "$1" | "$extract_pl") )
-	elif [ "$LIBTYPE" = "macho" ]; then
-		SYSCALLS=( $(${OTOOL} -tv "$1" | "$extract_pl") )
-	else
+	SYSCALLS=( $(cat "$tf_code" | "$extract_pl") )
+	SYSCALLS_SEQ="$(seq 0 $((${#SYSCALLS[@]}-1)))"
+
+	echo -n "" > "$tf_syscalls"
+	for s in $SYSCALLS_SEQ; do
+		sc=${SYSCALLS[$s]#*:}
+		echo "$sc" >> "$tf_syscalls"
+	done
+}
+
+function extract_syscall_tree() {
+	echo -e "\textracting intra-library syscall tree..."
+	local extract_pl="${CDIR}/scripts/${LIBTYPE}_${ARCH}_syscall_tree.pl"
+	if [ ! -f "$extract_pl" ]; then
 		echo "E:"
-		echo "E: unsupported lib type:'$LIBTYPE'"
+		echo "E: missing syscall extraction perl script: '$extract_pl'"
 		echo "E:"
-		exit 1
 	fi
+	SYSCALLS+=( $("$extract_pl" "$tf_code" "$tf_syscalls") )
 	SYSCALLS_SEQ="$(seq 0 $((${#SYSCALLS[@]}-1)))"
 }
 
@@ -301,18 +332,31 @@ __EOF)
 	ANDROID_MK=$(cat -<<__EOF
 LOCAL_PATH := \$(call my-dir)
 include \$(CLEAR_VARS)
-common_cflags := -fPIC -DPTHREAD_DEBUG -DPTHREAD_DEBUG_ENABLED=0 \\
-		-DCRT_LEGACY_WORKAROUND -D_LIBC=1 \\
+LOCAL_CFLAGS := -fPIC \\
 		-DHAVE_ARM_TLS_REGISTER -DANDROID_SMP=1 \\
-		-fno-stack-protector
-LOCAL_CFLAGS := \$(common_cflags) -std=gnu99
-LOCAL_CPPFLAGS := \$(common_cflags)
-LOCAL_C_INCLUDE := \$(LOCAL_PATH)/platform/android/arm/include
+		-fno-stack-protector -Werror \\
+		-DLIBNAME=${LIB/.so/_real.so}
+LOCAL_CONLYFLAGS := -std=gnu99
+LOCAL_CPPFLAGS := -std=c++0x
+LOCAL_C_INCLUDE := \$(LOCAL_PATH)/platform/android/\$(TARGET_ARCH)/include
 LOCAL_ASFLAGS += -fPIC -I\$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include \\
-		-I\$(LOCAL_PATH)/platform/android/arm/include
+		 -I\$(LOCAL_PATH)/platform/android/\$(TARGET_ARCH)/include
 LOCAL_SRC_FILES := \\
 		$(basename "$asm") \\
 		wrap_lib.c
+LOCAL_MODULE:= ${module_name}
+LOCAL_ADDITIONAL_DEPENDENCIES := \$(LOCAL_PATH)/Android.mk
+# should _only_ depend on libdl - anything else may cause problems!
+LOCAL_SHARED_LIBRARIES := libdl
+LOCAL_WHOLE_STATIC_LIBRARIES :=
+LOCAL_SYSTEM_SHARED_LIBRARIES :=
+__EOF)
+	if [ "${LIB}" = "libc.so" ]; then
+		ANDROID_MK=$(cat -<<__EOF
+$ANDROID_MK
+LOCAL_CFLAGS += -D_LIBC=1 \\
+		-DCRT_LEGACY_WORKAROUND \\
+		-DPTHREAD_DEBUG -DPTHREAD_DEBUG_ENABLED=0
 LOCAL_NO_CRT := true
 LOCAL_SRC_FILES := \\
 		platform/android/crtbegin_so.c \\
@@ -320,17 +364,16 @@ LOCAL_SRC_FILES := \\
 		platform/android/libc_glue.c \\
 		platform/android/getopt_long.c \\
 		platform/android/libc_init.cpp \\
-		\$(LOCAL_SRC_FILES) \\
 		platform/android/__stack_chk_fail.cpp \\
+		\$(LOCAL_SRC_FILES) \\
 		platform/android/\$(TARGET_ARCH)/crtend_so.S
-LOCAL_MODULE:= ${module_name}
-LOCAL_ADDITIONAL_DEPENDENCIES := \$(LOCAL_PATH)/Android.mk
-# should _only_ depend on libdl - anything else will cause problems!
-LOCAL_SHARED_LIBRARIES := libdl
-LOCAL_WHOLE_STATIC_LIBRARIES :=
-LOCAL_SYSTEM_SHARED_LIBRARIES :=
 include \$(BUILD_SHARED_LIBRARY)
 __EOF)
+	else
+		ANDROID_MK=$(cat -<<__EOF
+include \$(BUILD_SHARED_LIBRARY)
+__EOF)
+	fi
 
 	mkdir -p "$dir" 2>/dev/null
 	ln -s "${CDIR}/wrap_lib.c" "${dir}" 2>/dev/null
@@ -419,14 +462,11 @@ function should_wrap_android_elf() {
 		__SHOULD_WRAP=0
 		return
 	fi
-	if [ "$fcn" = "getauxval" ]; then
-		__SHOULD_WRAP=0
-		return;
-	fi
 	if [ "$fcn" = "__errno" ]; then
 		__SHOULD_WRAP=0
 		return;
 	fi
+	# covers getopt, getopt_long, getopt_long_only
 	if [ "${fcn:0:6}" = "getopt" ]; then
 		__SHOULD_WRAP=0
 		return;
@@ -456,7 +496,7 @@ function macho_functions() {
 function elf_functions() {
 	local lib="$1"
 	local fcn=
-	local entries=( $(${ELF_OBJDUMP} -d "${lib}" \
+	local entries=( $(cat "$tf_code" \
 				| grep '^[0-9a-f][0-9a-f]* <[^>][^>]*>:' \
 				| $SED 's/.*<\([^>]*\)>:/\1/') )
 	FUNCTIONS=( )
@@ -499,6 +539,9 @@ elif [ "$LIBTYPE" = "macho" ]; then
 	LIB_BASE="/usr/lib"
 fi
 
+tf_code="${CDIR}/.$$.$RANDOM.code.tmp"
+tf_syscalls="${CDIR}/.$$.$RANDOM.syscalls.tmp"
+
 if [ -z "${LIB}" -a -d "${LIBDIR}" ]; then
 	ALL_LIBS=
 	if [ "$LIBTYPE" = "elf" ]; then
@@ -509,7 +552,11 @@ if [ -z "${LIB}" -a -d "${LIBDIR}" ]; then
 	echo "LIBS of type $LIBTYPE in '$LIBDIR': '$ALL_LIBS'"
 	for l in "$ALL_LIBS"; do
 		echo "Processing '$l'..."
-		extract_syscalls "$l"
+		extract_code "$l"
+		if [ $WRAPALL -eq 0 ]; then
+			extract_syscalls "$l"
+			extract_syscall_tree
+		fi
 		extract_functions "$l"
 		# use path relative to 'LIBDIR'
 		_l="${l#${LIBDIR}/}"
@@ -517,9 +564,14 @@ if [ -z "${LIB}" -a -d "${LIBDIR}" ]; then
 	done
 else
 	echo "Processing '$LIB'..."
-	extract_syscalls "$LIB"
+	extract_code "$LIB"
+	if [ $WRAPALL -eq 0 ]; then
+		extract_syscalls "$LIB"
+		extract_syscall_tree
+	fi
 	extract_functions "$LIB"
 	write_wrappers "$LIB" "${LIB_BASE}/$(basename $LIB)"
 fi
 
-
+rm -f "$tf_code"
+rm -f "$tf_syscalls"

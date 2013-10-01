@@ -5,16 +5,22 @@
 #ifndef WRAP_LIB_H
 #define WRAP_LIB_H
 
+
 #if defined(ANDROID)
-#define LIBC_PATH "/system/lib/libc_real.so"
+#define LIB_PATH "/system/lib"
+#define LIBC_NAME "libc_real.so"
 #define LOGFILE_PATH "/data/local/tmp"
 #elif defined(__APPLE__)
-#define LIBC_PATH "/usr/lib/system/libsystem_kernel_real.so"
+#define LIB_PATH "/usr/lib/system"
+#define LIBC_NAME "libsystem_kernel_real.dylib"
 #define LOGFILE_PATH "/tmp"
 #else
-#define LIBC_PATH "/lib/libc_real.so"
+#define LIB_PATH "/lib"
+#define LIBC_NAME "libc_real.so"
 #define LOGFILE_PATH "/tmp"
 #endif
+
+#define LIBC_PATH LIB_PATH "/" LIBC_NAME
 
 #include <stdio.h>
 #include <pthread.h>
@@ -25,6 +31,7 @@ struct libc_iface {
 	void *dso;
 
 	FILE *(*fopen)(const char *pathname, const char *mode);
+	int (*fclose)(FILE *f);
 	ssize_t (*fwrite)(const void *buf, size_t size, size_t nitems, FILE *f);
 	int (*fno)(FILE *f);
 
@@ -44,10 +51,5 @@ struct libc_iface {
 };
 
 extern int init_libc_iface(struct libc_iface *iface, const char *dso_path);
-
-#define BUG(X) \
-	do { \
-		*((volatile int *)X) = X; \
-	} while (0)
 
 #endif

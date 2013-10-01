@@ -16,6 +16,11 @@ extern const char *__progname;
 
 static struct libc_iface libc;
 
+#define _BUG(X) \
+	do { \
+		*((volatile int *)X) = X; \
+	} while (0)
+
 static FILE *get_log(void)
 {
 	static pthread_key_t log_key = (pthread_key_t)(-1);
@@ -23,7 +28,7 @@ static FILE *get_log(void)
 
 	if (!libc.dso)
 		if (init_libc_iface(&libc, LIBC_PATH) < 0)
-			BUG(0x10);
+			_BUG(0x10);
 
 	if (log_key == (pthread_key_t)(-1))
 		libc.pthread_key_create(&log_key, NULL);
@@ -33,9 +38,9 @@ static FILE *get_log(void)
 		char buf[256];
 		libc.snprintf(buf, sizeof(buf), "%s/%d.%d.%s.log",
 			      LOGFILE_PATH, libc.getpid(), libc.gettid(), __progname);
-		libc.printf("Creating logfile: %s\n", buf);
+		/* libc.printf("Creating logfile: %s\n", buf); */
 		logf = libc.fopen(buf, "a+");
-		libc.printf("\topen=%d\n", libc.fno(logf));
+		/* libc.printf("\topen=%d\n", libc.fno(logf)); */
 		if (!logf)
 			return NULL;
 		libc.fprintf(logf, "STARTED %d\n", libc.fno(logf));
@@ -49,9 +54,20 @@ static FILE *get_log(void)
 		FILE *f; \
 		f = get_log(); \
 		if (!f) \
-			BUG(0x99); \
+			_BUG(0x99); \
 		libc.fprintf(f, fmt "\n", ## __VA_ARGS__ ); \
-		libc.printf("\tLOG:%d: " fmt "\n", libc.fno(f),  ## __VA_ARGS__); \
+		/* libc.printf("\tLOG:%d: " fmt "\n", libc.fno(f),  ## __VA_ARGS__); */ \
+	} while (0)
+
+#define BUG(X) \
+	do { \
+		FILE *f; \
+		f = get_log(); \
+		if (f) { \
+			libc_log("BUG(0x%x) at %s:%d\n", X, __FILE__, __LINE__); \
+			libc.fclose(f); \
+		} \
+		_BUG(X); \
 	} while (0)
 
 /**
@@ -137,6 +153,7 @@ int init_libc_iface(struct libc_iface *iface, const char *dso_path)
 	}
 
 	init_sym(iface, fopen,);
+	init_sym(iface, fclose,);
 	init_sym(iface, fwrite,);
 	init_sym(iface, fno, fileno);
 	init_sym(iface, getpid,);
