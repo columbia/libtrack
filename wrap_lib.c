@@ -12,14 +12,72 @@
 
 #include "wrap_lib.h"
 
-extern const char *__progname;
+extern const char *progname; /* comes from real libc */
+
+/*
+ * Symbol table / information
+ *
+ */
+#undef SAVED
+#undef SYM
+#define SAVED(addr,name) #name
+#define SYM(addr,name)
+static const char *wrapped_sym=
+#include "real_syms.h"
+;
+#undef SAVED
+#undef SYM
+
+#define SAVED(addr,name)
+#define SYM(addr,name) { #name, (unsigned long)(addr) },
+struct symbol {
+	const char *name;
+	unsigned long offset;
+} sym_table[] = {
+#include "real_syms.h"
+	{ NULL, 0 },
+};
+
+static int local_strcmp(const char *s1, const char *s2)
+{
+	while (*s1 == *s2++)
+		if (*s1++ == 0)
+			return (0);
+	return (*(unsigned char *)s1 - *(unsigned char *)--s2);
+}
 
 static struct libc_iface libc;
 
-#define _BUG(X) \
-	do { \
-		*((volatile int *)X) = X; \
-	} while (0)
+static Dl_info wrapped_dli;
+
+/*
+ * Use our internal offset table to locate the symbol within the
+ * given DSO handle.
+ *
+ */
+static void *table_dlsym(void *dso, const char *sym)
+{
+	struct symbol *symbol;
+
+	if (!wrapped_dli.dli_fbase) {
+		void *sym;
+		/* get the address of a symbol we know exists in the library */
+		sym = dlsym(dso, wrapped_sym);
+		if (!sym)
+			_BUG(0x1);
+		if (dladdr(sym, &wrapped_dli) == 0)
+			_BUG(0x2);
+	}
+
+	for (symbol = &sym_table[0]; symbol->name; symbol++) {
+		if (local_strcmp(symbol->name, sym) == 0)
+			break;
+	}
+	if (!symbol->name)
+		return NULL;
+
+	return (void *)((char *)wrapped_dli.dli_fbase + symbol->offset);
+}
 
 static FILE *get_log(void)
 {
@@ -37,7 +95,7 @@ static FILE *get_log(void)
 	if (!logf) {
 		char buf[256];
 		libc.snprintf(buf, sizeof(buf), "%s/%d.%d.%s.log",
-			      LOGFILE_PATH, libc.getpid(), libc.gettid(), __progname);
+			      LOGFILE_PATH, libc.getpid(), libc.gettid(), progname);
 		/* libc.printf("Creating logfile: %s\n", buf); */
 		logf = libc.fopen(buf, "a+");
 		/* libc.printf("\topen=%d\n", libc.fno(logf)); */
@@ -94,7 +152,7 @@ void *wrapped_dlsym(const char *libpath, void **lib_handle, const char *symbol)
 			BUG(0x22);
 	}
 
-	sym = dlsym(*lib_handle, symbol);
+	sym = table_dlsym(*lib_handle, symbol);
 	if (!sym)
 		BUG(0x23);
 	return sym;
@@ -139,15 +197,15 @@ int init_libc_iface(struct libc_iface *iface, const char *dso_path)
 	if (!iface->dso) {
 		iface->dso = dlopen(dso_path, RTLD_NOW | RTLD_LOCAL);
 		if (!iface->dso)
-			BUG(0x1);
+			_BUG(0x40);
 	}
 #define init_sym(iface,sym,alt) \
 	if (!(iface)->sym) { \
-		(iface)->sym = (typeof ((iface)->sym))dlsym((iface)->dso, #sym); \
+		(iface)->sym = (typeof ((iface)->sym))table_dlsym((iface)->dso, #sym); \
 		if (!(iface)->sym) {\
-			(iface)->sym = (typeof ((iface)->sym))dlsym((iface)->dso, #alt); \
+			(iface)->sym = (typeof ((iface)->sym))table_dlsym((iface)->dso, #alt); \
 			if (!(iface)->sym) \
-				BUG(0x2); \
+				_BUG(0x41); \
 		} \
 	}
 

@@ -20,6 +20,7 @@ FILE=`which file`
 OTOOL=`which otool`
 SED=`which gsed`
 ELF_OBJDUMP=`which ${TOOL_PFX}objdump`
+ELF_READELF=`which ${TOOL_PFX}readelf`
 
 if [ -z "$SED" ]; then
 	# hope for the best...
@@ -157,11 +158,15 @@ elif [ "$LIBTYPE" = "elf" ]; then
 		echo "Can't find ${TOOL_PFX}objdump in your path."
 		exit 2
 	fi
+	if [ -z "$ELF_READELF" -o ! -x "$ELF_READELF" ]; then
+		echo "Can't find ${TOOL_PFX}readelf in your path."
+		exit 2
+	fi
 fi
 
 if [ -z "$STRIP" -o ! -x "${STRIP}" ]; then
 	echo "ERROR: Can't find '${STRIP}' in your path!"
-	exit 1
+	exit 2
 fi
 
 
@@ -357,8 +362,8 @@ LOCAL_SRC_FILES := \\
 		platform/android/crtbegin_so.c \\
 		$(basename "$asm") \\
 		wrap_lib.c \\
-		platform/android/__stack_chk_fail.cpp \\
 		platform/android/\$(TARGET_ARCH)/crtend_so.S
+# platform/android/__stack_chk_fail.cpp
 LOCAL_MODULE:= ${module_name}
 LOCAL_ADDITIONAL_DEPENDENCIES := \$(LOCAL_PATH)/Android.mk
 LOCAL_LDFLAGS := -L\$(LOCAL_PATH) \$(LOCAL_PATH)/${LIBPFX}${LIB} -Wl,-soname=$LIB
@@ -402,7 +407,7 @@ function write_wrappers() {
 	local libname=
 	local fcn=
 	local num=
-	LIBPATH=${LIBPFX}${_libpath}
+	LIBPATH=${_libpath}
 	if [ "$LIBTYPE" = "elf" ]; then
 		libname=${_libname%.so}.S
 	else
@@ -457,32 +462,11 @@ function should_wrap_android_elf() {
 		__SHOULD_WRAP=0
 		return
 	fi
-	if [ "$fcn" = "atexit" ]; then
-		__SHOULD_WRAP=0
-		return
-	fi
-	if [ "$fcn" = "__aeabi_atexit" ]; then
-		__SHOULD_WRAP=0
-		return
-	fi
 	if [ "$fcn" = "__libc_init" ]; then
 		__SHOULD_WRAP=0
 		return;
 	fi
-	if [ "$fcn" = "__stack_chk_fail" ]; then
-		__SHOULD_WRAP=0
-		return
-	fi
 	if [ "$fcn" = "__errno" ]; then
-		__SHOULD_WRAP=0
-		return;
-	fi
-	if [ "$fcn" = "setenv" ]; then
-		__SHOULD_WRAP=0
-		return;
-	fi
-	# covers getopt, getopt_long, getopt_long_only
-	if [ "${fcn:0:6}" = "getopt" ]; then
 		__SHOULD_WRAP=0
 		return;
 	fi
@@ -576,13 +560,17 @@ function strip_elf_library() {
 	${ELF_OBJDUMP} -T "$out" | grep ' g' | grep .text \
 			| awk -F' ' '{print $6}' > "${tf_funclist}"
 
+	${ELF_READELF} -s "$out" | grep -v FUNC | grep -v UND \
+			| tail +4 | head -1 \
+			| awk '{print "SAVED(0x"$2","$8")"}' > "${symtable}"
+
 	# The 'STRIP' variable here points to our custom 'elfmod.py' script
 	# that modifies ELF libraries in-place
-	${STRIP} hidesyms "$out" "${tf_funclist}" > "${symtable}"
+	${STRIP} hidesyms "$out" "${tf_funclist}" >> "${symtable}"
 
 	# Modify the SONAME of the output library to avoid name collisions
 	# libdoes_stuff.so -> _ibdoes_stuff_so
-	${STRIP} soname "$out" "_${soname/.so/_so}"
+	${STRIP} soname "$out" "_${soname//./_}"
 }
 
 function strip_macho_library() {
@@ -673,14 +661,16 @@ if [ -z "${LIB}" -a -d "${LIBDIR}" ]; then
 		extract_functions "$l"
 		# use path relative to 'LIBDIR'
 		_l="${l#${LIBDIR}/}"
+		__l="_${_l:1}"
 		_l_out="${OUTDIR}/${_l}/$(basename ${_l})"
 		_l_real="${OUTDIR}/${_l}/${LIBPFX}$(basename ${_l})"
 		strip_library "${l}" "${_l_real}" "${OUTDIR}/${_l}/real_syms.h"
-		write_wrappers "${_l_out}" "${LIB_BASE}/${_l}"
+		write_wrappers "${_l_out}" "${LIB_BASE}/${__l//./_}"
 	done
 else
 	echo "Processing '$LIB'..."
 	_l=$(basename ${LIB})
+	__l="_${_l:1}"
 	_l_out="${OUTDIR}/${LIB}/${_l}"
 	_l_real="${OUTDIR}/${LIB}/${LIBPFX}${_l}"
 	extract_code "$LIB"
@@ -690,7 +680,7 @@ else
 	fi
 	extract_functions "$LIB"
 	strip_library "$LIB" "${_l_real}" "${OUTDIR}/${LIB}/real_syms.h"
-	write_wrappers "${_l_out}" "${LIB_BASE}/${_l}"
+	write_wrappers "${_l_out}" "${LIB_BASE}/${__l//./_}"
 fi
 
 rm -f "$tf_code"

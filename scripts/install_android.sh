@@ -20,7 +20,7 @@ fi
 
 lib="$(basename ${libdir%/})"
 _lib="_${lib:1}"
-symlnk="${_lib/.so/_so}"
+symlnk="${_lib//./_}"
 real="${LIBPFX}$lib"
 
 realpath="${libdir%/}/${real}"

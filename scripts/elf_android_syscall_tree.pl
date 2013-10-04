@@ -36,7 +36,6 @@ my %always_wrap = ( "malloc" => 1,
 
 # must be kept in-sync with wraplib.sh should_wrap_android_elf bash function
 my %never_wrap = ( ".plt" => 1,
-		   "__stack_chk_fail" => 1,
 		   "__libc_init" => 1,
 		   "__errno" => 1,
 		 );
