@@ -31,6 +31,9 @@
 #define END(x)
 #define STRING(nm, val) \
 	.text; .globl nm; nm: .asciz val
+
+	.macro unwind_linkage
+	.endm
 #if defined(MODEL_armv6)
         .machine  armv6
         .macro  cbz
@@ -57,14 +60,18 @@
 #define _amarg(arg,pos)			#arg
 #define _FN(x) concat(,x)
 #define ENTRY(x) \
-	.text; .align 4; .globl _FN(x); .type _FN(x),#function; .arm; _FN(x):
-	/* .text; .align 4; .globl _FN(x); .type _FN(x),#function; _FN(x): .fnstart */
+	.text; .align 4; .globl _FN(x); .type _FN(x),#function; .arm; _FN(x): .fnstart
 #define FUNC_LBL(x) \
-	.text; .align 4; .globl _FN(x); .type _FN(x),#function; _FN(x):
-#define END(x)
-	/* .fnend; .size _FN(x), .-_FN(x) */
+	.text; .align 4; .globl _FN(x); .type _FN(x),#function; .arm; _FN(x):
+#define END(x) \
+	.fnend; .size _FN(x), .-_FN(x)
 #define STRING(nm, val) \
 	.text; .globl nm; nm: .asciz val
+
+	.macro unwind_linkage
+	.save {r0-r12,lr}
+	.pad #68
+	.endm
 #endif
 /* End Apple compatibility macros */
 
@@ -106,9 +113,9 @@ STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
  * TODO: set the frame pointer properly for easier debugging...
  */
 	MACRO1(save_caller_state, reg) /* $0 = reg */
-	push	{lr}
-	add	lr, sp, #4	/* lr points to stack at time of func entry */
-	push	{r0-r12}
+	unwind_linkage
+	push	{r0-r12,lr}
+	add	lr, sp, #(14 * 4)	/* lr points to stack at time of func entry */
 	add	_marg(\reg,$0), lr, #64	/* 64-bytes back into the caller's stack */
 	/* copy the caller's stack state */
 	ldmda	_marg(\reg,$0)!, {r1-r8}
@@ -117,7 +124,9 @@ STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
 	stmdb	sp!, {r1-r8}
 	ldr	_marg(\reg,$0), [lr]	/* get top of orig stack! (extra 4 bytes) */
 	stmdb	sp!, {_marg(\reg,$0)}
-	sub	_marg(\reg,$0), lr, #(4 + (13 * 4)) /* \reg = saved r0 (13 regs + lr) */
+	sub	lr, #(14 * 4) /* lr = saved r0 */
+	mov	_marg(\reg,$0), lr
+	ldr	lr, [lr, #4] /* restore original lr */
 	.endm /* save_caller_state */
 
 
@@ -128,8 +137,7 @@ STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
  */
 	MACRO1(restore_caller_state, reg) /* $0 = rptr */
 	mov	sp, _marg(\reg,$0) /* jumps over all saved stack space */
-	pop	{r0-r12} /* overwrites \rptr! */
-	pop	{lr}
+	pop	{r0-r12,lr} /* overwrites \rptr! */
 	.endm
 
 /*

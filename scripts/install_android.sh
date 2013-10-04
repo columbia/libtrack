@@ -57,16 +57,37 @@ if [ ! -f "${wrapped_path}" ]; then
 	exit 1
 fi
 
+target_lib="${destroot}/${lib}"
+replacement_lib="${destroot}/$(basename ${wrapped_path})"
+
 echo "Installing into '$destroot'..."
 $ADB push "${wrapped_path}" "${destroot}"
 $ADB push "${realpath}" "${destroot}"
 $ADB shell "rm -f '${destroot}/${symlnk}'; ln -s '${real}' '${destroot}/${symlnk}'"
-$ADB shell "chmod 644 '${destroot}/$(basename ${wrapped_path})'; chmod 644 '${destroot}/$(basename ${realpath})'"
-
+$ADB shell "chmod 644 '${replacement_lib}'; chmod 644 '${destroot}/$(basename ${realpath})'"
 echo "done."
-echo ""
-echo "The final step is to replace the current library with the wrapped one:"
-echo "    cp '${destroot}/$(basename ${wrapped_path})' '${destroot}/${lib}'"
-echo ""
 
+echo ""
+echo "I am about to overwrite ${target_lib}!"
+echo -n "Are you sure it's OK? [y|N]: "
+read ans
+
+if [ ! "${ans:0:1}" = "y" -a ! "${ans:0:1}" = "Y" ]; then
+	echo "OK, I didn't replace anything :-)"
+	echo "The final step is to replace the current library with the wrapped one:"
+	echo "    cp '${destroot}/$(basename ${wrapped_path})' '${target_lib}'"
+	echo "    export LD_PRELOAD=${destroot}/${symlnk}"
+	echo ""
+	exit 0
+fi
+
+echo "Here we go (I'll back it up to ${target_lib}.bak first)!"
+$ADB shell "if [ ! -f '${target_lib}.bak' ]; then cp '${target_lib}' '${target_lib}.bak'; fi"
+$ADB shell "cp '${replacement_lib}' '${target_lib}'; chmod 644 '${target_lib}'"
+echo "done."
+
+echo ""
+echo "Be sure to preload the data-only library:"
+echo "    export LD_PRELOAD=${destroot}/${symlnk}"
+echo ""
 

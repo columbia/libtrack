@@ -7,6 +7,7 @@
 
 #include <stdio.h>
 #include <pthread.h>
+#include <unwind.h>
 #include <sys/cdefs.h>
 
 #if defined(ANDROID)
@@ -32,7 +33,13 @@
 
 __BEGIN_DECLS
 
-//typedef _Unwind_Reason_Code (*bt_func)(__unwind_context* context, void* arg);
+#ifdef HAVE_UNWIND_CONTEXT_STRUCT
+typedef struct _Unwind_Context __unwind_context;
+#else
+typedef _Unwind_Context __unwind_context;
+#endif
+typedef _Unwind_Reason_Code (*bt_func)(__unwind_context* context, void* arg);
+
 
 struct libc_iface {
 	void *dso;
@@ -53,8 +60,24 @@ struct libc_iface {
 	int (*printf)(const char *fmt, ...);
 	int (*fprintf)(FILE *f, const char *fmt, ...);
 
-	/* unwind and backtrace function */
-	//	void (*bt)(_Unwind_Backtrace..);
+	void *(*memset)(void *b, int c, size_t len);
+	void *(*malloc)(size_t size);
+	void (*free)(void *ptr);
+
+	/* backtrace interface */
+	int (*backtrace)(void **buffer, int size);
+	char ** (*backtrace_symbols)(void *const *buffer, int size);
+
+	/* unwind interface */
+	uintptr_t (*_Unwind_GetIP)(__unwind_context *ctx);
+#ifdef __arm__
+	_Unwind_VRS_Result (*_Unwind_VRS_Get)(_Unwind_Context *context,
+					      _Unwind_VRS_RegClass regclass,
+					      uint32_t regno,
+					      _Unwind_VRS_DataRepresentation representation,
+					      void *valuep);
+#endif
+	uintptr_t (*_Unwind_Backtrace)(bt_func func, void *arg);
 };
 
 extern int init_libc_iface(struct libc_iface *iface, const char *dso_path);

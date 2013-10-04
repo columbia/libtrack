@@ -362,6 +362,7 @@ LOCAL_SRC_FILES := \\
 		platform/android/crtbegin_so.c \\
 		$(basename "$asm") \\
 		wrap_lib.c \\
+		backtrace.c \\
 		platform/android/\$(TARGET_ARCH)/crtend_so.S
 # platform/android/__stack_chk_fail.cpp
 LOCAL_MODULE:= ${module_name}
@@ -387,6 +388,7 @@ include \$(BUILD_SHARED_LIBRARY)
 __EOF)
 
 	mkdir -p "$dir" 2>/dev/null
+	ln -s "${CDIR}/backtrace.c" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/wrap_lib.c" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/wrap_lib.h" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/arch" "${dir}" 2>/dev/null

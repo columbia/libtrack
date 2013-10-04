@@ -14,6 +14,19 @@
 
 extern const char *progname; /* comes from real libc */
 
+/* from backtrace.c */
+extern void log_backtrace(FILE *logf, const char *sym);
+
+static int local_strcmp(const char *s1, const char *s2)
+{
+	while (*s1 == *s2++)
+		if (*s1++ == 0)
+			return (0);
+	return (*(unsigned char *)s1 - *(unsigned char *)--s2);
+}
+
+struct libc_iface libc __attribute__((visibility("hidden")));
+
 /*
  * Symbol table / information
  *
@@ -37,16 +50,6 @@ struct symbol {
 #include "real_syms.h"
 	{ NULL, 0 },
 };
-
-static int local_strcmp(const char *s1, const char *s2)
-{
-	while (*s1 == *s2++)
-		if (*s1++ == 0)
-			return (0);
-	return (*(unsigned char *)s1 - *(unsigned char *)--s2);
-}
-
-static struct libc_iface libc;
 
 static Dl_info wrapped_dli;
 
@@ -140,9 +143,10 @@ void *wrapped_dlsym(const char *libpath, void **lib_handle, const char *symbol)
 {
 	void *sym;
 
+	/*
 	libc_log("lib:%s,handle:%p(%p),sym:%s", libpath, lib_handle,
 		 lib_handle ? *lib_handle : NULL, symbol);
-
+	 */
 	if (!lib_handle)
 		BUG(0x21);
 
@@ -167,7 +171,6 @@ void wrapped_tracer(const char *symbol)
 {
 	static pthread_key_t wrap_key = (pthread_key_t)(-1);
 	uint32_t wrapping = 0;
-	char buf[128];
 
 	if (!libc.dso)
 		if (init_libc_iface(&libc, LIBC_PATH) < 0)
@@ -183,10 +186,8 @@ void wrapped_tracer(const char *symbol)
 		return;
 	libc.pthread_setspecific(wrap_key, (const void *)1);
 
-	/*
-	 * TODO: perform backtrace here
-	 */
-	libc_log("%s", symbol);
+	/* libc_log("%s", symbol); */
+	log_backtrace(get_log(), symbol);
 
 	libc.pthread_setspecific(wrap_key, (const void *)0);
 	return;
@@ -199,28 +200,52 @@ int init_libc_iface(struct libc_iface *iface, const char *dso_path)
 		if (!iface->dso)
 			_BUG(0x40);
 	}
-#define init_sym(iface,sym,alt) \
-	if (!(iface)->sym) { \
+#define init_sym(iface,req,sym,alt) \
+	do { \
+		if ((iface)->sym) \
+			break; \
 		(iface)->sym = (typeof ((iface)->sym))table_dlsym((iface)->dso, #sym); \
-		if (!(iface)->sym) {\
-			(iface)->sym = (typeof ((iface)->sym))table_dlsym((iface)->dso, #alt); \
-			if (!(iface)->sym) \
-				_BUG(0x41); \
-		} \
-	}
+		if ((iface)->sym) \
+			break; \
+		(iface)->sym = (typeof ((iface)->sym))table_dlsym((iface)->dso, "_" #sym); \
+		if ((iface)->sym) \
+			break; \
+		(iface)->sym = (typeof ((iface)->sym))table_dlsym((iface)->dso, #alt); \
+		if ((iface)->sym) \
+			break; \
+		(iface)->sym = (typeof ((iface)->sym))table_dlsym((iface)->dso, "_" #alt); \
+		if ((iface)->sym) \
+			break; \
+		if (req) \
+			_BUG(0x41); \
+	} while (0)
 
-	init_sym(iface, fopen,);
-	init_sym(iface, fclose,);
-	init_sym(iface, fwrite,);
-	init_sym(iface, fno, fileno);
-	init_sym(iface, getpid,);
-	init_sym(iface, gettid, __thread_selfid);
-	init_sym(iface, pthread_key_create,);
-	init_sym(iface, pthread_getspecific,);
-	init_sym(iface, pthread_setspecific,);
-	init_sym(iface, snprintf,);
-	init_sym(iface, printf,);
-	init_sym(iface, fprintf,);
+	init_sym(iface, 1, fopen,);
+	init_sym(iface, 1, fclose,);
+	init_sym(iface, 1, fwrite,);
+	init_sym(iface, 1, fno, fileno);
+	init_sym(iface, 1, getpid,);
+	init_sym(iface, 1, gettid, __thread_selfid);
+	init_sym(iface, 1, pthread_key_create,);
+	init_sym(iface, 1, pthread_getspecific,);
+	init_sym(iface, 1, pthread_setspecific,);
+	init_sym(iface, 1, snprintf,);
+	init_sym(iface, 1, printf,);
+	init_sym(iface, 1, fprintf,);
+	init_sym(iface, 1, memset,);
+	init_sym(iface, 1, malloc,);
+	init_sym(iface, 1, free,);
+
+	/* backtrace interface */
+	init_sym(iface, 0, backtrace,);
+	init_sym(iface, 0, backtrace_symbols,);
+
+	/* unwind interface */
+	init_sym(iface, 0, _Unwind_GetIP,);
+#ifdef __arm__
+	init_sym(iface, 0, _Unwind_VRS_Get,);
+#endif
+	init_sym(iface, 0, _Unwind_Backtrace,);
 
 	return 0;
 }
