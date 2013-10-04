@@ -15,40 +15,70 @@
 
 #include <asm/page.h>
 #include <sys/auxv.h>
+#include <sys/cdefs.h>
 
-#include "libc_init_common.h"
+#define _REALLY_INCLUDE_SYS__SYSTEM_PROPERTIES_H_
+#include <sys/_system_properties.h>
 
-#define LIBC_PATH "/system/lib/libc_real.so"
+#include "bionic_tls.h"
+
+#define LIBC_PATH "/system/lib/_ibc_so"
 
 extern "C" void wrapped_tracer(const char *symbol);
 
-// ------------------------------------------------------------------
-//
-// From bionic/libc_init_common.cpp
-//
-// ------------------------------------------------------------------
+void *real_libc_dso;
 
-static void *real_libc_dso;
+/* -------------------------------------------------------------------
+ *
+ * From bionic/libc_init_common.h
+ *
+ */
+typedef struct {
+  void (**preinit_array)(void);
+  void (**init_array)(void);
+  void (**fini_array)(void);
+} structors_array_t;
+
+typedef __noreturn void (*init_func)(void *,
+				     void (*)(void),
+				     int (*)(int, char **, char **),
+				     structors_array_t const * const);
+
+extern "C"
+__noreturn void __libc_init(void* raw_args,
+                            void (*onexit)(void),
+                            int (*slingshot)(int, char**, char**),
+                            structors_array_t const * const structors);
+
+/* -------------------------------------------------------------------
+ *
+ * From bionic/libc_init_common.cpp
+ *
+ */
+#if 0
+/* TODO: connect this... */
+extern int __isthreaded __attribute__((weak_import));
 
 // Not public, but well-known in the BSDs.
-const char* __progname;
+extern const char *__progname __attribute__((weak_import));
 
-char** environ;
-uintptr_t __stack_chk_guard = 0;
-Elf32_auxv_t *__libc_auxv = NULL;
+extern char **environ __attribute__((weak_import));
+extern uintptr_t __stack_chk_guard __attribute__((weak_import));
+extern Elf32_auxv_t *__libc_auxv __attribute__((weak_import));
 
 // Declared in <asm/page.h>.
-unsigned int __page_size = PAGE_SIZE;
-unsigned int __page_shift = PAGE_SHIFT;
+extern unsigned int __page_size __attribute__((weak_import));
+extern unsigned int __page_shift __attribute__((weak_import));
 
 struct glue {
 	struct	glue *next;
 	int	niobs;
 	FILE	*iobs;
 };
-extern struct glue __sglue;
-extern FILE __sF[3];
+extern struct glue __sglue __attribute__((weak_import));
+extern FILE __sF[3] __attribute__((weak_import));
 
+prop_area *__system_property_area__ __attribute__((weak_import));
 
 static void __libc_init_bridge(void)
 {
@@ -73,13 +103,15 @@ static void __libc_init_bridge(void)
 	init_sym(__stack_chk_guard);
 	init_sym(__sF);
 	init_sym(__sglue);
+	init_sym(__system_property_area__);
 }
+#endif
 
-// ------------------------------------------------------------------
-//
-// From bionic/libc_init_dynamic.cpp
-//
-// ------------------------------------------------------------------
+/* -------------------------------------------------------------------
+ *
+ * From bionic/libc_init_dynamic.cpp
+ *
+ */
 
 // We flag the __libc_preinit function as a constructor to ensure
 // that its address is listed in libc.so's .init_array section.
@@ -87,25 +119,28 @@ static void __libc_init_bridge(void)
 // as soon as the shared library is loaded.
 __attribute__((constructor)) static void __libc_preinit()
 {
+	void *sym;
+
 	/*
 	 * don't clear the kernel args slot: we need the real libc's
 	 * initializer to see it and clear it. We force the dynamic loader
 	 * to initialize the real libc (and all its constructors) by
 	 * opening / loading it now.
 	 */
-	real_libc_dso = dlopen(LIBC_PATH, RTLD_NOW | RTLD_LOCAL);
+	real_libc_dso = dlopen(LIBC_PATH, RTLD_NOW | RTLD_GLOBAL);
 	if (!real_libc_dso)
 		*((volatile int *)0x111) = 0x111; /* SEGFAULT */
 
+	/*
+	sym = dlsym(real_libc_dso, "__progname");
+	__progname = *(const char **)sym;
+	*/
+
 	/* initialize some of our own copies of libc global variables */
-	__libc_init_bridge();
+	//__libc_init_bridge();
 }
 
-typedef __noreturn void (*init_func)(void *,
-				     void (*)(void),
-				     int (*)(int, char **, char **),
-				     structors_array_t const * const);
-
+extern "C"
 __noreturn void __libc_init(void* raw_args,
 			    void (*onexit)(void),
 			    int (*slingshot)(int, char**, char**),
@@ -118,3 +153,14 @@ __noreturn void __libc_init(void* raw_args,
 	/* pass the call along to the real libc */
 	real_init(raw_args, onexit, slingshot, structors);
 }
+
+/* -------------------------------------------------------------------
+ *
+ * From bionic/__errno.c
+ *
+ */
+volatile int*  __errno( void )
+{
+  return  &((volatile int*)__get_tls())[TLS_SLOT_ERRNO];
+}
+

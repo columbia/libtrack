@@ -14,12 +14,12 @@ __CMD="`echo -e '\n *\t'`$0 \\`echo -e '\n *\t'`\
 	  sed "s/\([^ ][^ ]*\)[ ][ ]*\([^ ][^ ]*\) /\1 \2 \\\\\\`echo -e '\n *\t\t'`/g")"
 
 
-OBJDUMP_PFX=${CROSS_COMPILE:-arm-eabi-}
+TOOL_PFX=${CROSS_COMPILE:-arm-eabi-}
 
 FILE=`which file`
 OTOOL=`which otool`
 SED=`which gsed`
-ELF_OBJDUMP=`which ${OBJDUMP_PFX}objdump`
+ELF_OBJDUMP=`which ${TOOL_PFX}objdump`
 
 if [ -z "$SED" ]; then
 	# hope for the best...
@@ -38,6 +38,8 @@ LIBDIR=
 LIBTYPE=
 LIBPATH=
 OUTDIR=.
+
+LIBPFX=real_
 
 function usage() {
 	echo -e "Usage: $0 --lib path/to/library "
@@ -144,19 +146,28 @@ fi
 # Verify tools/input
 #
 if [ "$LIBTYPE" = "macho" ]; then
+	STRIP=`which strip`
 	if [ -z "$OTOOL" -o ! -x "$OTOOL" ]; then
 		echo "Can't find otool in your path - have you installed the command-line Developer tools?"
 		exit 2
 	fi
 elif [ "$LIBTYPE" = "elf" ]; then
+	STRIP="${CDIR}/elfmod/elfmod.py"
 	if [ -z "$ELF_OBJDUMP" -o ! -x "$ELF_OBJDUMP" ]; then
-		echo "Can't find ${OBJDUMP_PFX}objdump in your path."
+		echo "Can't find ${TOOL_PFX}objdump in your path."
 		exit 2
 	fi
 fi
 
-tf_syscalls=
+if [ -z "$STRIP" -o ! -x "${STRIP}" ]; then
+	echo "ERROR: Can't find '${STRIP}' in your path!"
+	exit 1
+fi
+
+
 tf_code=
+tf_syscalls=
+tf_funclist=
 declare -a SYSCALLS=( )
 SYSCALLS_SEQ=
 declare -a FUNCTIONS=( )
@@ -169,7 +180,7 @@ function extract_code() {
 	if [ "$LIBTYPE" = "elf" ]; then
 		${ELF_OBJDUMP} -d "$1" > "$tf_code"
 	elif [ "$LIBTYPE" = "macho" ]; then
-		${OTOOL} -tv "$1" > "$tf_code"
+		${OTOOL} -tV "$1" > "$tf_code"
 	else
 		echo "E:"
 		echo "E: unsupported lib type:'$LIBTYPE'"
@@ -335,18 +346,22 @@ include \$(CLEAR_VARS)
 LOCAL_CFLAGS := -fPIC \\
 		-DHAVE_ARM_TLS_REGISTER -DANDROID_SMP=1 \\
 		-fno-stack-protector -Werror \\
-		-DLIBNAME=${LIB/.so/_real.so}
+		-DLIBNAME=${LIBPFX}${LIB}
 LOCAL_CONLYFLAGS := -std=gnu99
 LOCAL_CPPFLAGS := -std=c++0x
 LOCAL_C_INCLUDE := \$(LOCAL_PATH)/platform/android/\$(TARGET_ARCH)/include
 LOCAL_ASFLAGS += -fPIC -I\$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include \\
 		 -I\$(LOCAL_PATH)/platform/android/\$(TARGET_ARCH)/include
+LOCAL_NO_CRT := true
 LOCAL_SRC_FILES := \\
+		platform/android/crtbegin_so.c \\
 		$(basename "$asm") \\
-		wrap_lib.c
+		wrap_lib.c \\
+		platform/android/__stack_chk_fail.cpp \\
+		platform/android/\$(TARGET_ARCH)/crtend_so.S
 LOCAL_MODULE:= ${module_name}
 LOCAL_ADDITIONAL_DEPENDENCIES := \$(LOCAL_PATH)/Android.mk
-# should _only_ depend on libdl - anything else may cause problems!
+LOCAL_LDFLAGS := -L\$(LOCAL_PATH) \$(LOCAL_PATH)/${LIBPFX}${LIB} -Wl,-soname=$LIB
 LOCAL_SHARED_LIBRARIES := libdl
 LOCAL_WHOLE_STATIC_LIBRARIES :=
 LOCAL_SYSTEM_SHARED_LIBRARIES :=
@@ -354,26 +369,17 @@ __EOF)
 	if [ "${LIB}" = "libc.so" ]; then
 		ANDROID_MK=$(cat -<<__EOF
 $ANDROID_MK
+LOCAL_SRC_FILES += \\
+		platform/android/libc_init.cpp
 LOCAL_CFLAGS += -D_LIBC=1 \\
 		-DCRT_LEGACY_WORKAROUND \\
 		-DPTHREAD_DEBUG -DPTHREAD_DEBUG_ENABLED=0
-LOCAL_NO_CRT := true
-LOCAL_SRC_FILES := \\
-		platform/android/crtbegin_so.c \\
-		platform/android/atexit_legacy.c \\
-		platform/android/libc_glue.c \\
-		platform/android/getopt_long.c \\
-		platform/android/libc_init.cpp \\
-		platform/android/__stack_chk_fail.cpp \\
-		\$(LOCAL_SRC_FILES) \\
-		platform/android/\$(TARGET_ARCH)/crtend_so.S
-include \$(BUILD_SHARED_LIBRARY)
-__EOF)
-	else
-		ANDROID_MK=$(cat -<<__EOF
-include \$(BUILD_SHARED_LIBRARY)
 __EOF)
 	fi
+	ANDROID_MK=$(cat -<<__EOF
+$ANDROID_MK
+include \$(BUILD_SHARED_LIBRARY)
+__EOF)
 
 	mkdir -p "$dir" 2>/dev/null
 	ln -s "${CDIR}/wrap_lib.c" "${dir}" 2>/dev/null
@@ -388,18 +394,19 @@ __EOF)
 
 
 function write_wrappers() {
-	local _libname="${OUTDIR}/$1/$(basename $1)"
+	#local _libname="${OUTDIR}/$1/$(basename $1)"
+	local _libname="$1"
 	local dir=$(dirname "${_libname}")
 	local _libpath="$2"
+	local _outfile
 	local libname=
 	local fcn=
 	local num=
+	LIBPATH=${LIBPFX}${_libpath}
 	if [ "$LIBTYPE" = "elf" ]; then
 		libname=${_libname%.so}.S
-		LIBPATH=${_libpath%.so}_real.so
 	else
 		libname=${_libname%.dylib}.S
-		LIBPATH=${_libpath%.dylib}_real.S
 	fi
 
 	LIB="$(basename $1)"
@@ -454,6 +461,10 @@ function should_wrap_android_elf() {
 		__SHOULD_WRAP=0
 		return
 	fi
+	if [ "$fcn" = "__aeabi_atexit" ]; then
+		__SHOULD_WRAP=0
+		return
+	fi
 	if [ "$fcn" = "__libc_init" ]; then
 		__SHOULD_WRAP=0
 		return;
@@ -463,6 +474,10 @@ function should_wrap_android_elf() {
 		return
 	fi
 	if [ "$fcn" = "__errno" ]; then
+		__SHOULD_WRAP=0
+		return;
+	fi
+	if [ "$fcn" = "setenv" ]; then
 		__SHOULD_WRAP=0
 		return;
 	fi
@@ -478,7 +493,23 @@ function should_wrap_android_elf() {
 #
 function macho_functions() {
 	local dylib="$1"
-	local entries=( $(${OTOOL} -tv "$dylib" | grep '^[^[]*:\s*$' \
+	local entries=
+	local _libarch=
+	local libarch=
+
+	if [ ! "$ARCH" = "arm" ]; then
+		echo "E:"
+		echo "E: Architecture '$ARCH' is unsupported!"
+		echo "E:"
+		exit 1
+	fi
+
+	_libarch=$(${OTOOL} -h "$dylib" | grep architecture \
+			| tail -1 | sed 's,.*(architecture \(.*\)):.*,\1,')
+	if [ ! -z "$_libarch" ]; then
+		libarch="-arch $_libarch"
+	fi
+	entries=( $(${OTOOL} $libarch -tV "$dylib" | grep '^[^[]*:\s*$' \
 				| grep -v "$dylib" | $SED 's/:[ ]*//g') )
 	FUNCTIONS=( )
 	for idx in $(seq 0 $((${#entries[@]}-1))); do
@@ -528,6 +559,87 @@ function extract_functions() {
 	fi
 }
 
+__STRIPPED_LIB=
+
+function strip_elf_library() {
+	local in="$1"
+	local out="$2"
+	local symtable="$3"
+	local _soname="$(basename $1)"
+	local soname=${_soname:1}
+
+	# Copy the input file, and modify the output file in-place
+	cp "$in" "$out"
+
+	# get a list of all the global symbols, and prefix each one with
+	# the GNU strip option "-N "
+	${ELF_OBJDUMP} -T "$out" | grep ' g' | grep .text \
+			| awk -F' ' '{print $6}' > "${tf_funclist}"
+
+	# The 'STRIP' variable here points to our custom 'elfmod.py' script
+	# that modifies ELF libraries in-place
+	${STRIP} hidesyms "$out" "${tf_funclist}" > "${symtable}"
+
+	# Modify the SONAME of the output library to avoid name collisions
+	# libdoes_stuff.so -> _ibdoes_stuff_so
+	${STRIP} soname "$out" "_${soname/.so/_so}"
+}
+
+function strip_macho_library() {
+	local in="$1"
+	local out="$2"
+	local symtable="$3"
+	local _libarch=
+	local libarch=
+
+	if [ ! "$ARCH" = "arm" ]; then
+		echo "E:"
+		echo "E: Architecture '$ARCH' is unsupported!"
+		echo "E:"
+		exit 1
+	fi
+
+	_libarch=$(${OTOOL} -h "$dylib" | grep architecture \
+			| tail -1 | sed 's,.*(architecture \(.*\)):.*,\1,')
+	if [ ! -z "$_libarch" ]; then
+		libarch="-arch $_libarch"
+	fi
+
+	# Get a list of functions
+	${OTOOL} $libarch -tV "$dylib" \
+			| grep '^[^0-9].*:$' \
+			| grep -v "$dylib" \
+			| $SED 's/:[ ]*$//' > "$tf_funclist"
+
+	# TODO: write out 'symtable' with format 'SYM(ADDR,NAME)' (one-per-line)
+
+	# Apple Strip options:
+	# -u        :  Save all undefined symbols
+	# -R {file} :  Remove all symbols listed in {file}
+	# -i        :  Ignore symbols listed in {file} that are _not_ in ${in}
+	# -S        :  Remove debugging symbols
+	# -o {file} :  Write output library to {file}
+	${STRIP} -u -R "${tf_funclist}" -i -S -o "$out" - "$in"
+}
+
+function strip_library() {
+	local libname="$1"
+	local outname="$2"
+	local symfile="$3"
+
+	mkdir -p "$(dirname $outname)" 2>/dev/null
+	echo -e "\tstripping '${libname}' into '${outname}'..."
+	if [ "$LIBTYPE" = "elf" ]; then
+		strip_elf_library "$libname" "$outname" "$symfile"
+	elif [ "$LIBTYPE" = "macho" ]; then
+		strip_macho_library "$libname" "$outname" "$symfile"
+	else
+		echo "E:"
+		echo "E: unsupported library type '$LIBTYPE'"
+		echo "E:"
+	fi
+}
+
 LIB_BASE=
 if [ "$LIBTYPE" = "elf" ]; then
 	if [ "$ARCH" = "android" ]; then
@@ -541,6 +653,7 @@ fi
 
 tf_code="${CDIR}/.$$.$RANDOM.code.tmp"
 tf_syscalls="${CDIR}/.$$.$RANDOM.syscalls.tmp"
+tf_funclist="${CDIR}/.$$.$RANDOM.funclist.tmp"
 
 if [ -z "${LIB}" -a -d "${LIBDIR}" ]; then
 	ALL_LIBS=
@@ -560,18 +673,26 @@ if [ -z "${LIB}" -a -d "${LIBDIR}" ]; then
 		extract_functions "$l"
 		# use path relative to 'LIBDIR'
 		_l="${l#${LIBDIR}/}"
-		write_wrappers "${_l}" "${LIB_BASE}/${_l}"
+		_l_out="${OUTDIR}/${_l}/$(basename ${_l})"
+		_l_real="${OUTDIR}/${_l}/${LIBPFX}$(basename ${_l})"
+		strip_library "${l}" "${_l_real}" "${OUTDIR}/${_l}/real_syms.h"
+		write_wrappers "${_l_out}" "${LIB_BASE}/${_l}"
 	done
 else
 	echo "Processing '$LIB'..."
+	_l=$(basename ${LIB})
+	_l_out="${OUTDIR}/${LIB}/${_l}"
+	_l_real="${OUTDIR}/${LIB}/${LIBPFX}${_l}"
 	extract_code "$LIB"
 	if [ $WRAPALL -eq 0 ]; then
 		extract_syscalls "$LIB"
 		extract_syscall_tree
 	fi
 	extract_functions "$LIB"
-	write_wrappers "$LIB" "${LIB_BASE}/$(basename $LIB)"
+	strip_library "$LIB" "${_l_real}" "${OUTDIR}/${LIB}/real_syms.h"
+	write_wrappers "${_l_out}" "${LIB_BASE}/${_l}"
 fi
 
 rm -f "$tf_code"
 rm -f "$tf_syscalls"
+rm -f "$tf_funclist"

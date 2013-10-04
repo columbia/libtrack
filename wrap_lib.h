@@ -8,15 +8,15 @@
 
 #if defined(ANDROID)
 #define LIB_PATH "/system/lib"
-#define LIBC_NAME "libc_real.so"
+#define LIBC_NAME "_ibc_so"
 #define LOGFILE_PATH "/data/local/tmp"
 #elif defined(__APPLE__)
 #define LIB_PATH "/usr/lib/system"
-#define LIBC_NAME "libsystem_kernel_real.dylib"
+#define LIBC_NAME "_ibsystem_kernel_dylib"
 #define LOGFILE_PATH "/tmp"
 #else
 #define LIB_PATH "/lib"
-#define LIBC_NAME "libc_real.so"
+#define LIBC_NAME "_ibc_so"
 #define LOGFILE_PATH "/tmp"
 #endif
 

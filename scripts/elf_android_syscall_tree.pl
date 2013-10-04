@@ -36,14 +36,12 @@ my %always_wrap = ( "malloc" => 1,
 
 # must be kept in-sync with wraplib.sh should_wrap_android_elf bash function
 my %never_wrap = ( ".plt" => 1,
-		   "atexit" => 1,
-		   "__libc_init" => 1,
 		   "__stack_chk_fail" => 1,
+		   "__libc_init" => 1,
 		   "__errno" => 1,
-		   "getopt" => 1,
-		   "getopt_long" => 1,
-		   "getopt_long_only" => 1
 		 );
+
+#"__aeabi_atexit" => 1,
 
 sub find_syscalls {
 	my $sc_ref = shift;

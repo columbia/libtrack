@@ -43,7 +43,7 @@ static FILE *get_log(void)
 		/* libc.printf("\topen=%d\n", libc.fno(logf)); */
 		if (!logf)
 			return NULL;
-		libc.fprintf(logf, "STARTED %d\n", libc.fno(logf));
+		libc.fprintf(logf, "STARTED LOG\n");
 		libc.pthread_setspecific(log_key, logf);
 	}
 	return logf;
@@ -53,9 +53,8 @@ static FILE *get_log(void)
 	do { \
 		FILE *f; \
 		f = get_log(); \
-		if (!f) \
-			_BUG(0x99); \
-		libc.fprintf(f, fmt "\n", ## __VA_ARGS__ ); \
+		if (f) \
+			libc.fprintf(f, fmt "\n", ## __VA_ARGS__ ); \
 		/* libc.printf("\tLOG:%d: " fmt "\n", libc.fno(f),  ## __VA_ARGS__); */ \
 	} while (0)
 
