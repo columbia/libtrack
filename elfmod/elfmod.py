@@ -37,24 +37,33 @@ def hidesyms(args):
     #print "Loading symbols from", args.syms
     with open(args.syms) as sf:
         hidden_syms = sf.read().splitlines()
-    for s in hidden_syms:
-        print "sym:", s
     #print elf
     for dsym in elf.getDynSyms():
         if dsym.name in hidden_syms:
-            print 'SYM(0x%x:%s)' % (dsym.st_value, dsym.name)
+            print 'SYM(0x%x,%s)' % (dsym.st_value, dsym.name)
             dsym.setStInfo(STB_LOCAL, dsym.getInfoType())
             dsym.setStOther(STV_HIDDEN)
     elf.writeDynamic()
 
+def soname(args):
+    print "\tSetting soname to '%s' in %s" % (args.name, args.elf)
+    elf = Elf(file(args.elf, "r+b"))
+    elf.setSoname(args.name)
+
 parser = argparse.ArgumentParser(prog=PROGRAM, description="Modify an ELF library in-place")
 subparsers = parser.add_subparsers(title='Mode', help='ELF modification mode')
 
-# The "hidesyms" commands
+# The "hidesyms" command
 parser_hs = subparsers.add_parser('hidesyms', help="Hide ELF symbols by re-writing the .dynsym table in-place")
 parser_hs.add_argument('elf', help="Path to ELF shared-object file")
 parser_hs.add_argument('syms', help="File containing symbols to hide (one per line)")
 parser_hs.set_defaults(func=hidesyms)
+
+# The "soname" command
+parser_sonm = subparsers.add_parser('soname', help="Modify the ELF soname")
+parser_sonm.add_argument('elf', help="Path to ELF shared-object file")
+parser_sonm.add_argument('name', help="New SONAME (length must be less than or equal to original length)")
+parser_sonm.set_defaults(func=soname)
 
 args = parser.parse_args()
 args.func(args)

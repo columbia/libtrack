@@ -483,6 +483,21 @@ class Elf(vs_elf.Elf32, vs_elf.Elf64):
             symbytes = sym.vsEmit()
             self.fd.write(symbytes)
 
+    def modStrtabString(self, offset, newstr, section=".strtab"):
+        oldstr = self.getStrtabString(offset, section)
+        if len(newstr) > len(oldstr):
+            raise Exception("Can't replace %d byte string with %d bytes! "
+                            "(must be equal or less than original)" % (len(oldstr), len(newstr)))
+        self.setFdAtSection(section, offset)
+        self.fd.write(newstr)
+        return None
+
+    def setSoname(self, name):
+        for dyn in self.dynamics:
+            if dyn.d_tag == DT_SONAME:
+                self.modStrtabString(dyn.d_value, name, ".dynstr")
+                break
+
     def readAtRva(self, rva, size):
         '''
         Calculate the file offset for the given RVA and
@@ -545,11 +560,11 @@ class Elf(vs_elf.Elf32, vs_elf.Elf64):
         self.fd.seek(off)
         return None
 
-    def setFdAtSection(self, secname):
+    def setFdAtSection(self, secname, offset=0):
         sec = self.getSection(secname)
         if sec == None:
             return 0
-        self.setFdOffset(sec.sh_offset)
+        self.setFdOffset(sec.sh_offset + offset)
         return sec.sh_size
 
     def getStrtabString(self, offset, section=".strtab"):
@@ -557,7 +572,6 @@ class Elf(vs_elf.Elf32, vs_elf.Elf64):
         bytes = self.readAtOffset(sec.sh_offset, sec.sh_size)
         index = bytes.find("\x00", offset)
         return bytes[offset:index]
-
 
     def getDynamics(self):
         '''
