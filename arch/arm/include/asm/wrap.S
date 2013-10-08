@@ -11,7 +11,7 @@
 #define   concat(_a,_b)  _concat(_a,_b)
 
 /*
- * Apple compatibility macros from:
+ * Apple compatibility macros adapted from:
  * http://psellos.com/2012/08/2012.08.arm-as-to-ios-4.html
  */
 #if defined(__APPLE__)
@@ -24,10 +24,11 @@
 #define _marg(arg,pos)			pos
 #define _amarg(arg,pos)			#pos
 #define _FN(x) concat(_,x)
-#define ENTRY(x) \
-	.text; .align 4; .globl _FN(x);  _FN(x):
 #define FUNC_LBL(x) \
 	.text; .align 4; .globl _FN(x);  _FN(x):
+#define ENTRY(x) \
+	FUNC_LBL(x); \
+	.arm
 #define END(x)
 #define STRING(nm, val) \
 	.text; .globl nm; nm: .asciz val
@@ -59,21 +60,32 @@
 #define _marg(arg,pos)			arg
 #define _amarg(arg,pos)			#arg
 #define _FN(x) concat(,x)
-#define ENTRY(x) \
-	.text; .align 4; .globl _FN(x); .type _FN(x),#function; .arm; _FN(x): .fnstart
 #define FUNC_LBL(x) \
-	.text; .align 4; .globl _FN(x); .type _FN(x),#function; .arm; _FN(x):
+	.text; .align 4; .globl _FN(x); _FN(x):
+#define ENTRY(x) \
+	FUNC_LBL(x); \
+	.arm; .fnstart
 #define END(x) \
-	.fnend; .size _FN(x), .-_FN(x)
+	.type _FN(x), %function; .fnend; .size _FN(x), .-_FN(x)
 #define STRING(nm, val) \
 	.text; .globl nm; nm: .asciz val
 
 	.macro unwind_linkage
-	.save {r0-r12,lr}
+	.save {lr}
+	/*
+	.save {r0-r11,lr}
 	.pad #68
+	*/
 	.endm
 #endif
 /* End Apple compatibility macros */
+
+/*
+ * @get_tls - get the TLS pointer value into a given register
+ */
+	MACRO1(get_tls,reg) /* $0 = rptr */
+	mrc	p15, 0, _marg(\reg,$0), c13, c0, 3	/* get TLS pointer into reg arg $0 */
+	.endm
 
 /*
  * @wrap_lib
@@ -104,29 +116,71 @@ STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
 
 
 /*
+ * @get_wrapping_adr - get a thread-local address for (re)storing register state
+ *
+ * puts the address into the 'ip' register
+ */
+	MACRO0(get_wrapping_adr)
+	symaddr	ip, s_wrapping_key
+	ldr	ip, [ip]
+	cmp	ip, #0
+	beq	1f
+	stmfd	sp!, {lr}
+	get_tls lr
+	ldr	ip, [lr, ip, lsl #2] /* ip = TLS[s_wrapping_key] */
+	ldmfd	sp!, {lr}
+1:
+	.endm
+
+/*
+ * @set_wrapping_adr - set a thread-local address for (re)storing register state
+ *
+ * puts the address into the 'ip' register
+ */
+	MACRO1(set_wrapping_adr, reg)
+	stmfd	sp!, {r11,lr}
+	symaddr	lr, s_wrapping_key
+	ldr	lr, [lr]
+	cmp	lr, #0
+	blt	1f
+	get_tls r11
+	str	_marg(\reg,$0), [r11, lr, lsl #2] /* TLS[s_wrapping_key] = \reg */
+1:	ldmfd	sp!, {r11,lr}
+	.endm
+
+/*
  * @save_caller_state - Save/copy arguments and prep for pass-thru function call
  *
  * At the end of the macro, 'rptr' will point to the saved value of the
  * caller's r0 (on the stack), and sp will point to a copy of the stack
  * registers.
- *
- * TODO: set the frame pointer properly for easier debugging...
  */
 	MACRO1(save_caller_state, reg) /* $0 = reg */
 	unwind_linkage
-	push	{r0-r12,lr}
-	add	lr, sp, #(14 * 4)	/* lr points to stack at time of func entry */
-	add	_marg(\reg,$0), lr, #64	/* 64-bytes back into the caller's stack */
+	get_wrapping_adr
+	cmp	ip, #0
+	beq	3f
+	stmfd	ip!, {r0-r11,lr}	/* emulate a stack push */
+	push	{lr}			/* pop before calling the real function */
+	set_wrapping_adr ip
+	mov	_marg(\reg,$0), ip	/* ip = saved r0 */
+	b	4f
+
+3:
+	stmfd	sp!, {r0-r11,lr}
+	add	lr, sp, #(13 * 4)	/* lr points to stack at time of func entry */
+	add	ip, lr, #64	/* 64-bytes back into the caller's stack */
 	/* copy the caller's stack state */
-	ldmda	_marg(\reg,$0)!, {r1-r8}
+	ldmda	ip!, {r1-r8}
 	stmdb	sp!, {r1-r8}
-	ldmda	_marg(\reg,$0)!, {r1-r8}
+	ldmda	ip!, {r1-r8}
 	stmdb	sp!, {r1-r8}
-	ldr	_marg(\reg,$0), [lr]	/* get top of orig stack! (extra 4 bytes) */
-	stmdb	sp!, {_marg(\reg,$0)}
-	sub	lr, #(14 * 4) /* lr = saved r0 */
+	ldr	ip, [lr]	/* get top of orig stack (extra 4 bytes) */
+	stmdb	sp!, {ip}
+	sub	lr, #(13 * 4) /* lr = saved r0 */
 	mov	_marg(\reg,$0), lr
-	ldr	lr, [lr, #4] /* restore original lr */
+	ldr	lr, [lr, #(12 * 4)]	/* restore original lr */
+4:
 	.endm /* save_caller_state */
 
 
@@ -136,24 +190,34 @@ STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
  * TODO: restore the frame pointer
  */
 	MACRO1(restore_caller_state, reg) /* $0 = rptr */
-	mov	sp, _marg(\reg,$0) /* jumps over all saved stack space */
-	pop	{r0-r12,lr} /* overwrites \rptr! */
+	get_wrapping_adr
+	cmp	ip, #0
+	beq	8f
+	/* bit0 == flag from the caller: TLS is valid, but uninitialized. */
+	tst	ip, #1
+	bic	ip, ip, #1
+	beq	7f			/* flag _not_ set */
+
+	/* flags is set: reset the TLS value, and unwind the stack */
+	set_wrapping_adr ip
+	b	8f			/* unwind the stack */
+
+7:	ldm	ip!, {r0-r11,lr}	/* emulate a stack pop */
+	set_wrapping_adr ip
+	b	9f
+
+8:	mov	sp, _marg(\reg,$0) /* jumps over all saved stack space */
+	pop	{r0-r11,lr} /* overwrites \rptr! */
+9:
 	.endm
 
 /*
- * @get_tls - get the TLS pointer value into a given register
+ * @func_alias - output the start of a function
  */
-	MACRO1(get_tls,reg) /* $0 = rptr */
-	mrc	p15, 0, _marg(\reg,$0), c13, c0, 3	/* get TLS pointer into reg arg $0 */
-	.endm
-
-/*
- * @func_entry - output the start of a function
- */
-	MACRO2(func_entry, sym, pfx)
+	MACRO2(func_alias, sym, pfx)
 FUNC_LBL(_marg(\pfx,$1)_marg(\sym,$0))
 	.endm
-	
+
 /*
  * @wrap_func - Create a wrapper entry point for a given symbol
  *
@@ -175,37 +239,46 @@ STRING(marg(__wrapstr_,\wrapsym,$1), _amarg(\wrapsym,$1))
 
 	MACRO3(wrap_func_end, wraplib, wrapsym, pfx)
 ENTRY(_marg(\pfx,$2)_marg(\wrapsym,$1))
-	/* save caller args, put pointer to r0 (on stack) in r10 */
-	save_caller_state r10	
+	/* save caller args, put pointer to r0 (on stack) in r4 */
+	save_caller_state r4
 
 	/* lookup wrapped func address */
-	symaddr	r11, marg(__wrapsym_,\wrapsym,$1)
-	ldr	r11, [r11]
-	cmp	r11, #0
-	bne	1f
+	symaddr	r5, marg(__wrapsym_,\wrapsym,$1)
+	ldr	r5, [r5]
+	cmp	r5, #0
+	bne	5f
 	symaddr	r0, marg(__wraplib_path_,\wraplib,$0)
 	symaddr	r1, marg(__libhandle_,\wraplib,$0)
 	symaddr	r2, marg(__wrapstr_,\wrapsym,$1)
 	blx	_FN(wrapped_dlsym)
 	cmp	r0, #0
-	beq	2f
-	symaddr	r11, marg(__wrapsym_,\wrapsym,$1)
-	str	r0, [r11]
-	mov	r11, r0
-1:
+	beq	6f
+	symaddr	r5, marg(__wrapsym_,\wrapsym,$1)
+	str	r0, [r5]
+	mov	r5, r0
+5:
 	/* call any defined "tracing" function */
 #ifdef WRAP_TRACE_FUNC
+	/* prototype:
+	   void wrapper(const char *symbol, void *regs, void *stack);
+	 */
 	symaddr r0, marg(__wrapstr_,\wrapsym,$1)
+	mov	r1, r4
+	mov	r2, sp
 	blx	_FN(WRAP_TRACE_FUNC)
 #endif
 	/* restore registers and make the original function call */
-	ldmia	r10, {r0-r3}
-	blx	r11
-	stmia	r10, {r0-r3}	/* overwrite r0-r3 on the stored orig regs */
+	pop	{lr}		/* pushed in save_caller_state */
+	ldmia	r4, {r0-r3}
+	blx	r5
+	stmia	r4, {r0-r3}	/* overwrite r0-r3 on the stored orig regs */
 
 	/* call any defined "postlude" function */
 #ifdef WRAP_POSTLUDE
-	/* prototype: void postlude(const char *sym, uint32_t rval0, uint32_t rval1, uint32_t rval2) */
+	/* prototype:
+	   void postlude(const char *sym, uint32_t rval0,
+			 uint32_t rval1, uint32_t rval2);
+	 */
 	mov	r3, r2
 	mov	r2, r1
 	mov	r1, r0
@@ -213,7 +286,7 @@ ENTRY(_marg(\pfx,$2)_marg(\wrapsym,$1))
 	blx	_FN(WRAP_POSTLUDE)
 #endif
 	/* restore stack and register state (including function return value) */
-2:	restore_caller_state r10
+6:	restore_caller_state r4
 	bx	lr
 END(_marg(\pfx,$2)_marg(\wrapsym,$1))
 	.endm /* wrap_func */
@@ -232,32 +305,32 @@ STRING(marg(__wrapstr_,\wrapsym,$1), _amarg(\wrapsym,$1))
 
 	MACRO2(pass_func_end, wraplib, wrapsym)
 ENTRY(_marg(\wrapsym,$1))
-	save_caller_state r10
+	save_caller_state r4
 
 	/* lookup wrapped func address */
-	symaddr	r11, marg(__wrapsym_,\wrapsym,$1)
-	ldr	r11, [r11]
-	cmp	r11, #0
-	bne	1f
+	symaddr	r5, marg(__wrapsym_,\wrapsym,$1)
+	ldr	r5, [r5]
+	cmp	r5, #0
+	bne	5f
 	symaddr	r0, marg(__wraplib_path_,\wraplib,$0)
 	symaddr	r1, marg(__libhandle_,\wraplib,$0)
 	symaddr	r2, marg(__wrapstr_,\wrapsym,$1)
 	blx	_FN(wrapped_dlsym)
 	cmp	r0, #0
-	beq	2f
-	symaddr	r11, marg(__wrapsym_,\wrapsym,$1)
-	str	r0, [r11]
-	mov	r11, r0
-1:
+	beq	6f
+	symaddr	r5, marg(__wrapsym_,\wrapsym,$1)
+	str	r0, [r5]
+	mov	r5, r0
+5:
 	/* restore registers and make the original function call */
-	ldmia	r10, {r0-r3}
-	blx	r11
-	/* save the possible return values in r0-r3 */
-	stmia	r10, {r0-r3}	/* overwrite r0-r3 on the stored orig regs */
+	pop	{lr}		/* pushed in save_caller_state */
+	ldmia	r4, {r0-r3}
+	blx	r5
+	stmia	r4, {r0-r3}	/* overwrite r0-r3 on the stored orig regs */
 
-2:
+6:
 	/* restore stack and register state (including function return value) */
-	restore_caller_state r10
+	restore_caller_state r4
 	bx	lr
 END(_marg(\wrapsym,$1))
 	.endm

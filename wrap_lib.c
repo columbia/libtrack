@@ -15,7 +15,8 @@
 extern const char *progname; /* comes from real libc */
 
 /* from backtrace.c */
-extern void log_backtrace(FILE *logf, const char *sym);
+extern void log_backtrace(FILE *logf, const char *sym,
+			  uint32_t *regs, uint32_t *stack);
 
 static int local_strcmp(const char *s1, const char *s2)
 {
@@ -52,6 +53,8 @@ struct symbol {
 };
 
 static Dl_info wrapped_dli;
+
+pthread_key_t s_wrapping_key __attribute__((visibility("hidden")));
 
 /*
  * Use our internal offset table to locate the symbol within the
@@ -97,14 +100,16 @@ static FILE *get_log(void)
 	logf = (FILE *)libc.pthread_getspecific(log_key);
 	if (!logf) {
 		char buf[256];
+		struct timeval tv;
 		libc.snprintf(buf, sizeof(buf), "%s/%d.%d.%s.log",
-			      LOGFILE_PATH, libc.getpid(), libc.gettid(), progname);
-		/* libc.printf("Creating logfile: %s\n", buf); */
+			      LOGFILE_PATH, libc.getpid(),
+			      libc.gettid(), progname);
 		logf = libc.fopen(buf, "a+");
-		/* libc.printf("\topen=%d\n", libc.fno(logf)); */
 		if (!logf)
 			return NULL;
-		libc.fprintf(logf, "STARTED LOG\n");
+		libc.gettimeofday(&tv, NULL);
+		libc.fprintf(logf, "BEGIN:%lu.%lu\n", (unsigned long)tv.tv_sec,
+			     (unsigned long)tv.tv_usec);
 		libc.pthread_setspecific(log_key, logf);
 	}
 	return logf;
@@ -116,7 +121,6 @@ static FILE *get_log(void)
 		f = get_log(); \
 		if (f) \
 			libc.fprintf(f, fmt "\n", ## __VA_ARGS__ ); \
-		/* libc.printf("\tLOG:%d: " fmt "\n", libc.fno(f),  ## __VA_ARGS__); */ \
 	} while (0)
 
 #define BUG(X) \
@@ -167,7 +171,7 @@ void *wrapped_dlsym(const char *libpath, void **lib_handle, const char *symbol)
  * @param symbol The symbol from which wrapped_tracer is being called
  *
  */
-void wrapped_tracer(const char *symbol)
+void wrapped_tracer(const char *symbol, void *regs, void *stack)
 {
 	static pthread_key_t wrap_key = (pthread_key_t)(-1);
 	uint32_t wrapping = 0;
@@ -187,7 +191,7 @@ void wrapped_tracer(const char *symbol)
 	libc.pthread_setspecific(wrap_key, (const void *)1);
 
 	/* libc_log("%s", symbol); */
-	log_backtrace(get_log(), symbol);
+	log_backtrace(get_log(), symbol, (uint32_t *)regs, (uint32_t *)stack);
 
 	libc.pthread_setspecific(wrap_key, (const void *)0);
 	return;
@@ -247,6 +251,7 @@ int init_libc_iface(struct libc_iface *iface, const char *dso_path)
 	init_sym(iface, 1, memcpy,);
 	init_sym(iface, 1, malloc,);
 	init_sym(iface, 1, free,);
+	init_sym(iface, 1, gettimeofday,);
 
 	/* backtrace interface */
 	init_sym(iface, 0, backtrace,);
@@ -258,6 +263,25 @@ int init_libc_iface(struct libc_iface *iface, const char *dso_path)
 	init_sym(iface, 0, _Unwind_VRS_Get,);
 #endif
 	init_sym(iface, 0, _Unwind_Backtrace,);
+
+	/* setup space for the wrapping code to save register state */
+	if (!s_wrapping_key) {
+		static size_t CTX_SZ = PAGE_SIZE;
+		void *mem, *stack_start;
+
+		mem = libc.malloc(CTX_SZ);
+		if (!mem)
+			return 0;
+		libc.memset(mem, 0, CTX_SZ);
+		stack_start = (char *)mem + CTX_SZ - sizeof(void *);
+		/* flag to let the assembly know we just set this up */
+		stack_start = (void *)((unsigned long)stack_start | 0x1);
+		libc.pthread_key_create(&s_wrapping_key, NULL);
+		if (libc.pthread_setspecific(s_wrapping_key, stack_start) < 0) {
+			libc.free(mem);
+			return 0;
+		}
+	}
 
 	return 0;
 }

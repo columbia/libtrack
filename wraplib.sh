@@ -296,7 +296,7 @@ function write_sym() {
 		__line_len=$(($__line_len + 2))
 		for sym in "${syms[@]}"; do
 			if [ "${sym}" != "${_fcn}" ]; then
-				echo "FUNC(${sym})" >> "${_dst}"
+				echo "FUNC_ALIAS(${sym})" >> "${_dst}"
 			fi
 		done
 		echo "${_type}_END(${_lib}, ${_fcn})" >> "${_dst}"

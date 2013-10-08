@@ -13,44 +13,85 @@
 
 extern struct libc_iface libc;
 
+#define FRAMES_TO_SKIP 3
 #define MAX_BT_FRAMES 64
-struct bt_state {
-	void *frames[MAX_BT_FRAMES];
-	const char **symbols;
-	int count;
 
+struct bt_frame {
+	void *pc;
+	const char *symbol;
+	void *symaddr;
+	const char *libname;
+	void *libstart;
+};
+
+struct bt_state {
+	struct bt_frame frame[MAX_BT_FRAMES];
+	int count;
 	int nskip;
 	FILE *f;
 };
 
-static inline void print_bt_state(struct bt_state *state)
+static void print_bt_state(struct bt_state *state, struct timeval *tv)
 {
-	int count = state->count;
+	int count;
+	struct bt_frame *frame;
+	unsigned long ofst;
+	char c;
 	const char *sym;
-	libc.fprintf(state->f, "BT:START\n");
-	while (count--) {
-		sym = state->symbols[count];
+
+	libc.fprintf(state->f, "BT:START:%lu.%lu\n",
+		     (unsigned long)tv->tv_sec, (unsigned long)tv->tv_usec);
+	for (count = 0; count <= state->count; count++) {
+		frame = &state->frame[count];
+		if (!frame->symaddr) {
+			c = '+';
+			ofst = (unsigned long)frame->pc -
+				(unsigned long)frame->libstart;
+		} else if ((unsigned long)frame->pc >
+			   (unsigned long)frame->symaddr) {
+			c = '+';
+			ofst = (unsigned long)frame->pc -
+				(unsigned long)frame->symaddr;
+		} else {
+			c = '-';
+			ofst = (unsigned long)frame->symaddr -
+				(unsigned long)frame->pc;
+		}
+		sym = frame->symbol;
 		if (!sym)
 			sym = "??";
-		libc.fprintf(state->f, "  :%d:0x%x:%s:\n",
-			     count, state->frames[count], sym);
+		libc.fprintf(state->f, "  :%d:0x%x:%s:%c0x%x:%s(%p):\n",
+			     count, frame->pc, sym, c, ofst,
+			     frame->libname, frame->libstart);
 	}
 	libc.fprintf(state->f, "BT:END\n");
 }
 
-static void std_backtrace(FILE *logf, const char *sym)
+static void std_backtrace(FILE *logf, const char *sym, struct timeval *tv)
 {
 	struct bt_state state;
+	void *frames[MAX_BT_FRAMES];
+	struct bt_frame *frame;
+	int count;
+	Dl_info info;
 
 	libc.memset(&state, 0, sizeof(state));
 	state.f = logf;
 
-	state.count = libc.backtrace(state.frames, MAX_BT_FRAMES);
-	state.symbols = (const char **)libc.backtrace_symbols(state.frames,
-							      state.count);
+	state.count = libc.backtrace(frames, MAX_BT_FRAMES);
 
-	print_bt_state(&state);
-	libc.free(state.symbols);
+	for (count = 0; count < state.count; count++) {
+		frame = &state.frame[count];
+		if (dladdr(frames[count], &info) != 0) {
+			frame->pc = frames[count];
+			frame->symbol = info.dli_sname;
+			frame->symaddr = info.dli_saddr;
+			frame->libname = info.dli_fname;
+			frame->libstart = info.dli_fbase;
+		}
+	}
+
+	print_bt_state(&state, tv);
 }
 
 #ifdef __arm__
@@ -76,6 +117,7 @@ static inline uintptr_t __Unwind_GetIP(_Unwind_Context* ctx)
 static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 {
 	struct bt_state *state = (struct bt_state *)arg;
+	struct bt_frame *frame;
 	uintptr_t ip;
 	Dl_info info;
 
@@ -87,7 +129,7 @@ static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 	 *	wrapped_tracer
 	 * skip them both
 	 */
-	if (ip != 0 && state->nskip < 2) {
+	if (ip != 0 && state->nskip < FRAMES_TO_SKIP) {
 		state->nskip++;
 		return _URC_NO_REASON;
 	}
@@ -110,14 +152,14 @@ static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 	}
 #endif
 
-	state->frames[state->count] = (void *)ip;
+	frame = &state->frame[state->count];
+	frame->pc = (void *)ip;
 
 	if (dladdr((void *)ip, &info) != 0) {
-		/*
-		 * TODO: this doesn't account for PC offset
-		 *       e.g., when info.dli_saddr != ip
-		 */
-		state->symbols[state->count] = info.dli_sname;
+		frame->symbol = info.dli_sname;
+		frame->symaddr = info.dli_saddr;
+		frame->libname = info.dli_fname;
+		frame->libstart = info.dli_fbase;
 	}
 
 	state->count++;
@@ -128,28 +170,31 @@ static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 }
 
 
-static void unwind_backtrace(FILE *logf, const char *sym)
+static void unwind_backtrace(FILE *logf, const char *sym, struct timeval *tv)
 {
 	struct bt_state state;
 
 	libc.memset(&state, 0, sizeof(state));
-	state.symbols = malloc(MAX_BT_FRAMES * sizeof(char *));
-	libc.memset(state.symbols, 0, MAX_BT_FRAMES * sizeof(char *));
 	state.f = logf;
 
 	libc._Unwind_Backtrace(trace_func, &state);
 
-	print_bt_state(&state);
-	libc.free(state.symbols);
+	print_bt_state(&state, tv);
 }
 
 void __attribute__((visibility("hidden")))
-log_backtrace(FILE *logf, const char *sym)
+log_backtrace(FILE *logf, const char *sym, uint32_t *regs, uint32_t *stack)
 {
+	struct timeval tv;
+
+	libc.gettimeofday(&tv, NULL);
+
+	/* TODO: maybe print out function arguments? */
+
 	if (libc.backtrace)
-		std_backtrace(logf, sym);
+		std_backtrace(logf, sym, &tv);
 	else if (libc._Unwind_Backtrace)
-		unwind_backtrace(logf, sym);
+		unwind_backtrace(logf, sym, &tv);
 	else
-		libc.fprintf(logf, "ST:%s\n", sym);
+		libc.fprintf(logf, "CALL:%s\n", sym);
 }

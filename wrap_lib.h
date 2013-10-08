@@ -77,6 +77,8 @@ struct libc_iface {
 	void *(*malloc)(size_t size);
 	void (*free)(void *ptr);
 
+	int (*gettimeofday)(struct timeval *tp, void *tzp);
+
 	/* backtrace interface */
 	int (*backtrace)(void **buffer, int size);
 	char ** (*backtrace_symbols)(void *const *buffer, int size);
@@ -97,7 +99,7 @@ extern int init_libc_iface(struct libc_iface *iface, const char *dso_path);
 
 extern void *wrapped_dlsym(const char *libpath, void **lib_handle, const char *symbol);
 
-extern void wrapped_tracer(const char *symbol);
+extern void wrapped_tracer(const char *symbol, void *regs, void *stack);
 
 __END_DECLS
 #endif
