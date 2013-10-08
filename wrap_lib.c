@@ -200,20 +200,31 @@ int init_libc_iface(struct libc_iface *iface, const char *dso_path)
 		if (!iface->dso)
 			_BUG(0x40);
 	}
+
+#if defined(_LIBC) && _LIBC == 1
+/*
+ * if we're wrapping up libc, then we have to use the table_dlsym to find
+ * entry points inside!
+ */
+#define __dlsym table_dlsym
+#else
+#define __dlsym dlsym
+#endif
+
 #define init_sym(iface,req,sym,alt) \
 	do { \
 		if ((iface)->sym) \
 			break; \
-		(iface)->sym = (typeof ((iface)->sym))table_dlsym((iface)->dso, #sym); \
+		(iface)->sym = (typeof ((iface)->sym))__dlsym((iface)->dso, #sym); \
 		if ((iface)->sym) \
 			break; \
-		(iface)->sym = (typeof ((iface)->sym))table_dlsym((iface)->dso, "_" #sym); \
+		(iface)->sym = (typeof ((iface)->sym))__dlsym((iface)->dso, "_" #sym); \
 		if ((iface)->sym) \
 			break; \
-		(iface)->sym = (typeof ((iface)->sym))table_dlsym((iface)->dso, #alt); \
+		(iface)->sym = (typeof ((iface)->sym))__dlsym((iface)->dso, #alt); \
 		if ((iface)->sym) \
 			break; \
-		(iface)->sym = (typeof ((iface)->sym))table_dlsym((iface)->dso, "_" #alt); \
+		(iface)->sym = (typeof ((iface)->sym))__dlsym((iface)->dso, "_" #alt); \
 		if ((iface)->sym) \
 			break; \
 		if (req) \
@@ -233,6 +244,7 @@ int init_libc_iface(struct libc_iface *iface, const char *dso_path)
 	init_sym(iface, 1, printf,);
 	init_sym(iface, 1, fprintf,);
 	init_sym(iface, 1, memset,);
+	init_sym(iface, 1, memcpy,);
 	init_sym(iface, 1, malloc,);
 	init_sym(iface, 1, free,);
 

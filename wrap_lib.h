@@ -11,17 +11,29 @@
 #include <sys/cdefs.h>
 
 #if defined(ANDROID)
-#	define LIB_PATH "/system/lib"
-#	define LIBC_NAME "_ibc_so"
-#	define LOGFILE_PATH "/data/local/tmp"
+#  define LIB_PATH "/system/lib"
+#  if defined(_LIBC) && _LIBC == 1
+#    define LIBC_NAME "_ibc_so"
+#  else
+#    define LIBC_NAME "libc.so"
+#  endif
+#  define LOGFILE_PATH "/data/local/tmp"
 #elif defined(__APPLE__)
-#	define LIB_PATH "/usr/lib/system"
-#	define LIBC_NAME "_ibsystem_kernel_dylib"
-#	define LOGFILE_PATH "/tmp"
+#  define LIB_PATH "/usr/lib/system"
+#  if defined(_LIBC) && _LIBC == 1
+#    define LIBC_NAME "_ibc_dylib"
+#  else
+#    define LIBC_NAME "libc.dylib"
+#  endif
+#  define LOGFILE_PATH "/tmp"
 #else
-#	define LIB_PATH "/lib"
-#	define LIBC_NAME "_ibc_so"
-#	define LOGFILE_PATH "/tmp"
+#  define LIB_PATH "/lib"
+#  if defined(_LIBC) && _LIBC == 1
+#    define LIBC_NAME "_ibc_so"
+#  else
+#    define LIBC_NAME "_ibc_so"
+#  endif
+#  define LOGFILE_PATH "/tmp"
 #endif
 
 #define LIBC_PATH LIB_PATH "/" LIBC_NAME
@@ -61,6 +73,7 @@ struct libc_iface {
 	int (*fprintf)(FILE *f, const char *fmt, ...);
 
 	void *(*memset)(void *b, int c, size_t len);
+	void *(*memcpy)(void *dst, void *src, size_t len);
 	void *(*malloc)(size_t size);
 	void (*free)(void *ptr);
 
