@@ -40,7 +40,7 @@ if [ ! -d "$OUT" ]; then
 	else
 		echo "This script should be run from an Android build environment."
 		echo "I'm going to help you out though. Please provide the path where"
-		echo "the build wrapped library '$wrapper' can be found."
+		echo "the built 'wrapped' library '$wrapper' can be found."
 		echo -n "build dir: "
 		read wrapper_dir
 	fi
@@ -80,6 +80,9 @@ if [ ! "${ans:0:1}" = "y" -a ! "${ans:0:1}" = "Y" ]; then
 	echo ""
 	exit 0
 fi
+
+# needed if we're replacing something in /system
+$ADB remount
 
 echo "Here we go (I'll back it up to ${target_lib}.bak first)!"
 $ADB shell "if [ ! -f '${target_lib}.bak' ]; then cp '${target_lib}' '${target_lib}.bak'; fi"
