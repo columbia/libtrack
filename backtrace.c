@@ -13,7 +13,7 @@
 
 extern struct libc_iface libc;
 
-#define FRAMES_TO_SKIP 3
+#define FRAMES_TO_SKIP 2
 #define MAX_BT_FRAMES 64
 
 struct bt_frame {
@@ -41,7 +41,7 @@ static void print_bt_state(struct bt_state *state, struct timeval *tv)
 
 	libc.fprintf(state->f, "BT:START:%lu.%lu\n",
 		     (unsigned long)tv->tv_sec, (unsigned long)tv->tv_usec);
-	for (count = 0; count <= state->count; count++) {
+	for (count = 0; count < state->count; count++) {
 		frame = &state->frame[count];
 		if (!frame->symaddr) {
 			c = '+';
@@ -67,7 +67,8 @@ static void print_bt_state(struct bt_state *state, struct timeval *tv)
 	libc.fprintf(state->f, "BT:END\n");
 }
 
-static void std_backtrace(FILE *logf, const char *sym, struct timeval *tv)
+static inline
+void std_backtrace(FILE *logf, const char *sym, struct timeval *tv)
 {
 	struct bt_state state;
 	void *frames[MAX_BT_FRAMES];
@@ -170,7 +171,8 @@ static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 }
 
 
-static void unwind_backtrace(FILE *logf, const char *sym, struct timeval *tv)
+static inline
+void unwind_backtrace(FILE *logf, const char *sym, struct timeval *tv)
 {
 	struct bt_state state;
 

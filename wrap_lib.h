@@ -10,6 +10,10 @@
 #include <unwind.h>
 #include <sys/cdefs.h>
 
+#define ___str(x) #x
+#define __str(x) ___str(x)
+#define _str(x) __str(x)
+
 #if defined(ANDROID)
 #  define LIB_PATH "/system/lib"
 #  if defined(_LIBC) && _LIBC == 1
@@ -59,6 +63,7 @@ struct libc_iface {
 	FILE *(*fopen)(const char *pathname, const char *mode);
 	int (*fclose)(FILE *f);
 	ssize_t (*fwrite)(const void *buf, size_t size, size_t nitems, FILE *f);
+	int (*fflush)(FILE *f);
 	int (*fno)(FILE *f);
 
 	pid_t (*getpid)(void);
@@ -76,6 +81,9 @@ struct libc_iface {
 	void *(*memcpy)(void *dst, void *src, size_t len);
 	void *(*malloc)(size_t size);
 	void (*free)(void *ptr);
+
+	char *(*getenv)(const char *name);
+	int (*setenv)(const char *name, const char *value, int overwrite);
 
 	int (*gettimeofday)(struct timeval *tp, void *tzp);
 
@@ -95,11 +103,25 @@ struct libc_iface {
 	uintptr_t (*_Unwind_Backtrace)(bt_func func, void *arg);
 };
 
-extern int init_libc_iface(struct libc_iface *iface, const char *dso_path);
+extern struct libc_iface libc;
+
+extern int init_libc_iface(struct libc_iface *iface, const char *dso_path, int align);
+
+extern void close_libc_iface(void);
 
 extern void *wrapped_dlsym(const char *libpath, void **lib_handle, const char *symbol);
 
 extern void wrapped_tracer(const char *symbol, void *regs, void *stack);
+
+extern FILE *get_log(int release);
+
+#define libc_log(fmt, ...) \
+	do { \
+		FILE *f; \
+		f = get_log(0); \
+		if (f) \
+			libc.fprintf(f, fmt "\n", ## __VA_ARGS__ ); \
+	} while (0)
 
 __END_DECLS
 #endif

@@ -351,7 +351,8 @@ include \$(CLEAR_VARS)
 LOCAL_CFLAGS := -fPIC \\
 		-DHAVE_ARM_TLS_REGISTER -DANDROID_SMP=1 \\
 		-fno-stack-protector -Werror \\
-		-DLIBNAME=${LIBPFX}${LIB}
+		-DLIBNAME=${LIBPFX}${LIB} \\
+		-D_IBNAM_=$(basename ${LIBPATH})
 LOCAL_CONLYFLAGS := -std=gnu99
 LOCAL_CPPFLAGS := -std=c++0x
 LOCAL_C_INCLUDE := \$(LOCAL_PATH)/platform/android/\$(TARGET_ARCH)/include
@@ -376,6 +377,7 @@ __EOF)
 		ANDROID_MK=$(cat -<<__EOF
 $ANDROID_MK
 LOCAL_SRC_FILES += \\
+		platform/android/libc_wrappers.c \\
 		platform/android/libc_init.cpp
 LOCAL_CFLAGS += -D_LIBC=1 \\
 		-DCRT_LEGACY_WORKAROUND \\
