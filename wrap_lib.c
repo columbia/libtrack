@@ -98,22 +98,22 @@ FILE __attribute__((visibility("hidden"))) *get_log(int release)
 		if (init_libc_iface(&libc, LIBC_PATH, 0) < 0)
 			_BUG(0x10);
 
-	if (log_key == (pthread_key_t)(-1))
+	if (log_key == (pthread_key_t)(-1)) {
 		libc.pthread_key_create(&log_key, NULL);
+		libc.pthread_setspecific(log_key, NULL);
+	}
 
 	logf = (FILE *)libc.pthread_getspecific(log_key);
 	if (!logf) {
 		char buf[256];
-		struct timeval tv;
 		libc.snprintf(buf, sizeof(buf), "%s/%d.%d.%s.log",
 			      LOGFILE_PATH, libc.getpid(),
 			      libc.gettid(), progname);
 		logf = libc.fopen(buf, "a+");
 		if (!logf)
 			return NULL;
-		libc.gettimeofday(&tv, NULL);
-		libc.fprintf(logf, "BEGIN:%lu.%lu\n", (unsigned long)tv.tv_sec,
-			     (unsigned long)tv.tv_usec);
+		libc.fchmod(libc.fno(logf), 0666);
+		log_print(logf, LOG, "BEGIN");
 		libc.fflush(logf);
 		libc.pthread_setspecific(log_key, logf);
 	}
@@ -125,9 +125,10 @@ FILE __attribute__((visibility("hidden"))) *get_log(int release)
 #define BUG(X) \
 	do { \
 		FILE *f; \
-		f = get_log(0); \
+		f = get_log(1); \
 		if (f) { \
-			libc_log("BUG(0x%x) at %s:%d\n", X, __FILE__, __LINE__); \
+			log_print(f, _BUG_, "(0x%x) at %s:%d", X, __FILE__, __LINE__); \
+			libc.fflush(f); \
 			libc.fclose(f); \
 		} \
 		_BUG(X); \
@@ -135,6 +136,7 @@ FILE __attribute__((visibility("hidden"))) *get_log(int release)
 
 /**
  * @wrapped_dlsym Locate a symbol within a library, possibly loading the lib.
+ *
  * @param libpath Full path to the library in which symbol should be found
  * @param lib_handle Pointer to memory location to store loaded library handle
  * @param symbol String name of the symbol to be found in libpath
@@ -146,10 +148,6 @@ void *wrapped_dlsym(const char *libpath, void **lib_handle, const char *symbol)
 {
 	void *sym;
 
-	/*
-	libc_log("lib:%s,handle:%p(%p),sym:%s", libpath, lib_handle,
-		 lib_handle ? *lib_handle : NULL, symbol);
-	 */
 	if (!lib_handle)
 		BUG(0x21);
 
@@ -174,14 +172,18 @@ pthread_key_t wrap_key __attribute__((visibility("hidden"))) = (pthread_key_t)(-
  */
 void wrapped_tracer(const char *symbol, void *regs, void *stack)
 {
+	int ret;
+	FILE *logf;
 	uint32_t wrapping = 0;
 	int startup = (!regs && !stack);
 
 	if (!libc.dso)
 		if (init_libc_iface(&libc, LIBC_PATH, startup) < 0)
 			BUG(0x30);
+	logf = get_log(0);
 	if (startup) {
-		get_log(0); /* start the log file and exit (no backtrace) */
+		log_print(logf, CALL, "%s", symbol);
+		libc.fflush(logf);
 		return;
 	}
 
@@ -197,7 +199,7 @@ void wrapped_tracer(const char *symbol, void *regs, void *stack)
 
 	libc.pthread_setspecific(wrap_key, (const void *)1);
 
-	log_backtrace(get_log(0), symbol, (uint32_t *)regs, (uint32_t *)stack);
+	log_backtrace(logf, symbol, (uint32_t *)regs, (uint32_t *)stack);
 
 	wrap_special(symbol, regs, stack);
 
@@ -248,6 +250,7 @@ int init_libc_iface(struct libc_iface *iface, const char *dso_path, int align)
 	init_sym(iface, 1, fwrite,);
 	init_sym(iface, 1, fflush,);
 	init_sym(iface, 1, fno, fileno);
+	init_sym(iface, 1, fchmod,);
 	init_sym(iface, 1, getpid,);
 	init_sym(iface, 1, gettid, __thread_selfid);
 	init_sym(iface, 1, pthread_key_create,);
@@ -306,15 +309,12 @@ int init_libc_iface(struct libc_iface *iface, const char *dso_path, int align)
 void close_libc_iface(void)
 {
 	FILE *f;
-	struct timeval tv;
 
 	if (!libc.dso)
 		return;
 	f = get_log(1);
 	if (f) {
-		libc.gettimeofday(&tv, NULL);
-		libc.fprintf(f, "END:%lu.%lu\n", (unsigned long)tv.tv_sec,
-			    (unsigned long)tv.tv_usec);
+		log_print(f, LOG, "END");
 		libc.fflush(f);
 		libc.fclose(f);
 	}

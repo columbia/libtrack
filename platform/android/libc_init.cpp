@@ -23,8 +23,8 @@
 #include "bionic_tls.h"
 #include "wrap_lib.h"
 
-void *real_libc_dso;
-const char *progname;
+void *real_libc_dso = NULL;
+const char *progname = NULL;
 
 /* -------------------------------------------------------------------
  *

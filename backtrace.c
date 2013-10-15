@@ -13,7 +13,7 @@
 
 extern struct libc_iface libc;
 
-#define FRAMES_TO_SKIP 2
+#define FRAMES_TO_SKIP 3
 #define MAX_BT_FRAMES 64
 
 struct bt_frame {
@@ -39,8 +39,7 @@ static void print_bt_state(struct bt_state *state, struct timeval *tv)
 	char c;
 	const char *sym;
 
-	libc.fprintf(state->f, "BT:START:%lu.%lu\n",
-		     (unsigned long)tv->tv_sec, (unsigned long)tv->tv_usec);
+	__log_print(tv, state->f, "BT", "START");
 	for (count = 0; count < state->count; count++) {
 		frame = &state->frame[count];
 		if (!frame->symaddr) {
@@ -64,11 +63,10 @@ static void print_bt_state(struct bt_state *state, struct timeval *tv)
 			     count, frame->pc, sym, c, ofst,
 			     frame->libname, frame->libstart);
 	}
-	libc.fprintf(state->f, "BT:END\n");
+	log_print(state->f, BT, "END");
 }
 
-static inline
-void std_backtrace(FILE *logf, const char *sym, struct timeval *tv)
+static void std_backtrace(FILE *logf, const char *sym, struct timeval *tv)
 {
 	struct bt_state state;
 	void *frames[MAX_BT_FRAMES];
@@ -171,8 +169,7 @@ static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 }
 
 
-static inline
-void unwind_backtrace(FILE *logf, const char *sym, struct timeval *tv)
+static void unwind_backtrace(FILE *logf, const char *sym, struct timeval *tv)
 {
 	struct bt_state state;
 
@@ -198,5 +195,5 @@ log_backtrace(FILE *logf, const char *sym, uint32_t *regs, uint32_t *stack)
 	else if (libc._Unwind_Backtrace)
 		unwind_backtrace(logf, sym, &tv);
 	else
-		libc.fprintf(logf, "CALL:%s\n", sym);
+		__log_print(&tv, logf, "CALL", "%s", sym);
 }

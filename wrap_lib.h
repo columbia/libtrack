@@ -5,6 +5,7 @@
 #ifndef WRAP_LIB_H
 #define WRAP_LIB_H
 
+#include <dlfcn.h>
 #include <stdio.h>
 #include <pthread.h>
 #include <unwind.h>
@@ -21,7 +22,7 @@
 #  else
 #    define LIBC_NAME "libc.so"
 #  endif
-#  define LOGFILE_PATH "/data/local/tmp"
+#  define LOGFILE_PATH "/data/trace_logs"
 #elif defined(__APPLE__)
 #  define LIB_PATH "/usr/lib/system"
 #  if defined(_LIBC) && _LIBC == 1
@@ -65,6 +66,7 @@ struct libc_iface {
 	ssize_t (*fwrite)(const void *buf, size_t size, size_t nitems, FILE *f);
 	int (*fflush)(FILE *f);
 	int (*fno)(FILE *f);
+	int (*fchmod)(int fd, mode_t mode);
 
 	pid_t (*getpid)(void);
 	uint32_t (*gettid)(void);
@@ -115,12 +117,30 @@ extern void wrapped_tracer(const char *symbol, void *regs, void *stack);
 
 extern FILE *get_log(int release);
 
+#define __log_print(tvptr, f, key, fmt, ...) \
+	libc.fprintf(f, "%lu.%lu:" key ":" fmt "\n", \
+		     (unsigned long)(tvptr)->tv_sec, \
+		     (unsigned long)(tvptr)->tv_usec, ## __VA_ARGS__ )
+
+#define log_print(f, key, fmt, ...) \
+	do { \
+		struct timeval tv; \
+		libc.gettimeofday(&tv, NULL); \
+		__log_print(&tv, f, #key, fmt, ## __VA_ARGS__ ); \
+	} while (0)
+
 #define libc_log(fmt, ...) \
 	do { \
 		FILE *f; \
 		f = get_log(0); \
 		if (f) \
-			libc.fprintf(f, fmt "\n", ## __VA_ARGS__ ); \
+			log_print(f, LOG, fmt, ## __VA_ARGS__ ); \
+	} while (0)
+
+#define lnk_dbg(msg) \
+	do { \
+		extern void *real_libc_dso; \
+		(void)dlsym(real_libc_dso, "LOG:" msg); \
 	} while (0)
 
 __END_DECLS
