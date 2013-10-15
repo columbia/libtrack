@@ -120,16 +120,15 @@ STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
  *
  * puts the address into the 'ip' register
  */
-	MACRO0(get_wrapping_adr)
-	symaddr	ip, s_wrapping_key
-	ldr	ip, [ip]
-	cmp	ip, #0
-	beq	1f
-	stmfd	sp!, {lr}
-	get_tls lr
-	ldr	ip, [lr, ip, lsl #2] /* ip = TLS[s_wrapping_key] */
-	ldmfd	sp!, {lr}
-1:
+	MACRO2(get_wrapping_adr, reg, tmp) /* $0 = reg, $1 = tmp */
+	symaddr	_marg(\reg,$0), s_wrapping_key
+	ldr	_marg(\reg,$0), [_marg(\reg,$0)]
+	cmp	_marg(\reg,$0), #0
+	beq	0f
+	get_tls _marg(\tmp,$1)
+	/* load: reg = TLS[s_wrapping_key] */
+	ldr	_marg(\reg,$0), [_marg(\tmp,$1), _marg(\reg,$0), lsl #2]
+0:
 	.endm
 
 /*
@@ -137,15 +136,15 @@ STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
  *
  * puts the address into the 'ip' register
  */
-	MACRO1(set_wrapping_adr, reg)
-	stmfd	sp!, {r11,lr}
-	symaddr	lr, s_wrapping_key
-	ldr	lr, [lr]
-	cmp	lr, #0
+	MACRO3(set_wrapping_adr, reg, tmp1, tmp2)
+	symaddr	_marg(\tmp1,$1), s_wrapping_key
+	ldr	_marg(\tmp1,$1), [_marg(\tmp1,$1)]
+	cmp	_marg(\tmp1,$1), #0
 	blt	1f
-	get_tls r11
-	str	_marg(\reg,$0), [r11, lr, lsl #2] /* TLS[s_wrapping_key] = \reg */
-1:	ldmfd	sp!, {r11,lr}
+	get_tls _marg(\tmp2,$2)
+	/* TLS[s_wrapping_key] = reg */
+	str	_marg(\reg,$0), [_marg(\tmp2,$2), _marg(\tmp1,$1), lsl #2]
+1:
 	.endm
 
 /*
@@ -157,17 +156,18 @@ STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
  */
 	MACRO1(save_caller_state, reg) /* $0 = reg */
 	unwind_linkage
-	get_wrapping_adr
+	push	{lr}
+	get_wrapping_adr ip, lr
 	cmp	ip, #0
 	beq	3f
-	stmfd	ip!, {r0-r11,lr}	/* emulate a stack push */
-	push	{lr}			/* pop before calling the real function */
-	set_wrapping_adr ip
+	stmfd	ip!, {r0-r11}		/* emulate a stack push */
+	set_wrapping_adr ip, r0, r1
 	mov	_marg(\reg,$0), ip	/* ip = saved r0 */
+	ldr	lr, [sp, #4]		/* restore original lr */
 	b	4f
 
 3:
-	stmfd	sp!, {r0-r11,lr}
+	push	{r0-r11}
 	add	lr, sp, #(13 * 4)	/* lr points to stack at time of func entry */
 	add	ip, lr, #64	/* 64-bytes back into the caller's stack */
 	/* copy the caller's stack state */
@@ -184,30 +184,35 @@ STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
 	.endm /* save_caller_state */
 
 
-/*
+/**
  * @restore_caller_state - undo what 'save_caller_state' did
  *
- * TODO: restore the frame pointer
+ * @param reg register pointing to memory (stack or TLS) holding
+ *            saved register state
  */
 	MACRO1(restore_caller_state, reg) /* $0 = rptr */
-	get_wrapping_adr
+	push	{ip}		/* save this as it may be used outside the macro */
+	get_wrapping_adr ip, r0
 	cmp	ip, #0
-	beq	8f
+	beq	7f
+
 	/* bit0 == flag from the caller: TLS is valid, but uninitialized. */
 	tst	ip, #1
 	bic	ip, ip, #1
-	beq	7f			/* flag _not_ set */
+	beq	8f		/* flag _not_ set: restore from TLS */
 
 	/* flags is set: reset the TLS value, and unwind the stack */
-	set_wrapping_adr ip
-	b	8f			/* unwind the stack */
-
-7:	ldm	ip!, {r0-r11,lr}	/* emulate a stack pop */
-	set_wrapping_adr ip
+	set_wrapping_adr ip, r0, r1
+7:	pop	{ip}
+	mov	sp, _marg(\reg,$0)	/* jumps over all saved stack space */
+	pop	{r0-r11,lr}		/* overwrites \rptr! */
 	b	9f
 
-8:	mov	sp, _marg(\reg,$0) /* jumps over all saved stack space */
-	pop	{r0-r11,lr} /* overwrites \rptr! */
+8:	/* pop register state from the TLS "stack" */
+	ldm	ip!, {r0-r11}	/* emulate a stack pop */
+	push	{r0}
+	set_wrapping_adr ip, lr, r0
+	pop	{r0,ip,lr}
 9:
 	.endm
 
@@ -247,47 +252,32 @@ ENTRY(_marg(\pfx,$2)_marg(\wrapsym,$1))
 	ldr	r5, [r5]
 	cmp	r5, #0
 	bne	5f
+	mov	r5, lr	/* save the original lr in r5 */
 	symaddr	r0, marg(__wraplib_path_,\wraplib,$0)
 	symaddr	r1, marg(__libhandle_,\wraplib,$0)
 	symaddr	r2, marg(__wrapstr_,\wrapsym,$1)
 	blx	_FN(wrapped_dlsym)
 	cmp	r0, #0
-	beq	6f
+	beq	6f	/* will branch to original lr */
 	symaddr	r5, marg(__wrapsym_,\wrapsym,$1)
 	str	r0, [r5]
 	mov	r5, r0
-5:
-	/* call any defined "tracing" function */
+
+5:	/* call any defined "tracing" function */
 #ifdef WRAP_TRACE_FUNC
 	/* prototype:
 	   void wrapper(const char *symbol, void *regs, void *stack);
 	 */
 	symaddr r0, marg(__wrapstr_,\wrapsym,$1)
 	mov	r1, r4
-	mov	r2, sp
+	mov	r2, #13		/* keep this in-sync with save_caller_state */
+	mov	r3, sp
 	blx	_FN(WRAP_TRACE_FUNC)
 #endif
 	/* restore registers and make the original function call */
-	pop	{lr}		/* pushed in save_caller_state */
-	ldmia	r4, {r0-r3}
-	blx	r5
-	stmia	r4, {r0-r3}	/* overwrite r0-r3 on the stored orig regs */
-
-	/* call any defined "postlude" function */
-#ifdef WRAP_POSTLUDE
-	/* prototype:
-	   void postlude(const char *sym, uint32_t rval0,
-			 uint32_t rval1, uint32_t rval2);
-	 */
-	mov	r3, r2
-	mov	r2, r1
-	mov	r1, r0
-	symaddr r0, marg(__wrapstr_,\wrapsym,$1)
-	blx	_FN(WRAP_POSTLUDE)
-#endif
-	/* restore stack and register state (including function return value) */
-6:	restore_caller_state r4
-	bx	lr
+6:	mov	ip, r5
+	restore_caller_state r4
+	bx	ip
 END(_marg(\pfx,$2)_marg(\wrapsym,$1))
 	.endm /* wrap_func */
 
@@ -305,32 +295,26 @@ STRING(marg(__wrapstr_,\wrapsym,$1), _amarg(\wrapsym,$1))
 
 	MACRO2(pass_func_end, wraplib, wrapsym)
 ENTRY(_marg(\wrapsym,$1))
-	save_caller_state r4
-
 	/* lookup wrapped func address */
-	symaddr	r5, marg(__wrapsym_,\wrapsym,$1)
-	ldr	r5, [r5]
-	cmp	r5, #0
-	bne	5f
+	symaddr	ip, marg(__wrapsym_,\wrapsym,$1)
+	ldr	ip, [ip]
+	cmp	ip, #0
+	bne	6f
+	/* search for the symbol and cache it */
+	save_caller_state r4
 	symaddr	r0, marg(__wraplib_path_,\wraplib,$0)
 	symaddr	r1, marg(__libhandle_,\wraplib,$0)
 	symaddr	r2, marg(__wrapstr_,\wrapsym,$1)
+	mov	r5, lr
 	blx	_FN(wrapped_dlsym)
 	cmp	r0, #0
-	beq	6f
-	symaddr	r5, marg(__wrapsym_,\wrapsym,$1)
-	str	r0, [r5]
-	mov	r5, r0
-5:
-	/* restore registers and make the original function call */
-	pop	{lr}		/* pushed in save_caller_state */
-	ldmia	r4, {r0-r3}
-	blx	r5
-	stmia	r4, {r0-r3}	/* overwrite r0-r3 on the stored orig regs */
-
-6:
-	/* restore stack and register state (including function return value) */
-	restore_caller_state r4
-	bx	lr
+	moveq	ip, r5	/* original lr (return to caller) */
+	beq	5f
+	/* cache the symbol for next time */
+	symaddr	ip, marg(__wrapsym_,\wrapsym,$1)
+	str	r0, [ip]
+	mov	ip, r0
+5:	restore_caller_state r4
+6:	bx	ip
 END(_marg(\wrapsym,$1))
 	.endm
