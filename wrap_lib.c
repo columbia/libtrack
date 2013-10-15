@@ -19,7 +19,8 @@ extern void log_backtrace(FILE *logf, const char *sym,
 			  uint32_t *regs, uint32_t *stack);
 
 /* lib-specific wrapping handlers (e.g. [v]fork in libc) */
-extern void wrap_special(const char *symbol, uint32_t *regs, uint32_t *stack);
+extern int wrap_special(const char *symbol, uint32_t *regs,
+			int slots, uint32_t *stack);
 
 const char __attribute__((visibility("hidden")))
 * local_strrchr(const char *str, int c)
@@ -119,9 +120,12 @@ FILE __attribute__((visibility("hidden"))) *get_log(int release)
 	static pthread_key_t log_key = (pthread_key_t)(-1);
 	FILE *logf = NULL;
 
-	if (!libc.dso)
-		if (init_libc_iface(&libc, LIBC_PATH, 0) < 0)
+	if (!libc.dso) {
+		if (init_libc_iface(&libc, LIBC_PATH) < 0)
 			_BUG(0x10);
+		else
+			setup_tls_stack(1, NULL, 0);
+	}
 
 	if (log_key == (pthread_key_t)(-1)) {
 		libc.pthread_key_create(&log_key, NULL);
@@ -193,24 +197,30 @@ pthread_key_t wrap_key __attribute__((visibility("hidden"))) = (pthread_key_t)(-
 
 /**
  * @wrapped_tracer Default tracing function that stores a backtrace
- * @param symbol The symbol from which wrapped_tracer is being called
  *
+ * @param symbol The symbol from which wrapped_tracer is being called
+ * @param regs Pointer to saved register values
+ * @param slots Number of register slots saved in @c regs
+ * @param stack Pointer to the top of the stack at function entry
  */
-void wrapped_tracer(const char *symbol, void *regs, void *stack)
+int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack)
 {
 	int ret;
 	FILE *logf;
 	uint32_t wrapping = 0;
 	int startup = (!regs && !stack);
 
-	if (!libc.dso)
-		if (init_libc_iface(&libc, LIBC_PATH, startup) < 0)
+	if (!libc.dso) {
+		if (init_libc_iface(&libc, LIBC_PATH) < 0)
 			BUG(0x30);
+		else
+			setup_tls_stack(startup, NULL, 0);
+	}
 	logf = get_log(0);
 	if (startup) {
 		log_print(logf, CALL, "%s", symbol);
 		libc.fflush(logf);
-		return;
+		return 0;
 	}
 
 	if (wrap_key == (pthread_key_t)(-1)) {
@@ -221,19 +231,20 @@ void wrapped_tracer(const char *symbol, void *regs, void *stack)
 	/* quick check for recursive calls */
 	wrapping = (uint32_t)libc.pthread_getspecific(wrap_key);
 	if (wrapping)
-		return;
+		return 0;
 
 	libc.pthread_setspecific(wrap_key, (const void *)1);
 
 	log_backtrace(logf, symbol, (uint32_t *)regs, (uint32_t *)stack);
 
-	wrap_special(symbol, regs, stack);
+	ret = wrap_special(symbol, regs, slots, stack);
 
 	libc.pthread_setspecific(wrap_key, (const void *)0);
-	return;
+
+	return ret;
 }
 
-int init_libc_iface(struct libc_iface *iface, const char *dso_path, int align)
+int init_libc_iface(struct libc_iface *iface, const char *dso_path)
 {
 	if (!iface->dso) {
 		iface->dso = dlopen(dso_path, RTLD_NOW | RTLD_LOCAL);
@@ -304,32 +315,47 @@ int init_libc_iface(struct libc_iface *iface, const char *dso_path, int align)
 #endif
 	init_sym(iface, 0, _Unwind_Backtrace,);
 
+	return 0;
+}
 
-	/* TODO: refactor this into a function (to be called from special libc
-	 * wrappers for functions like fork() and pthread_create()
-	 */
+void setup_tls_stack(int align, void *regs, int slots)
+{
+	static size_t CTX_SZ = PAGE_SIZE;
+	void *mem, *stack_start;
 
-	/* setup space for the wrapping code to save register state */
-	if (!s_wrapping_key) {
-		static size_t CTX_SZ = PAGE_SIZE;
-		void *mem, *stack_start;
-
-		mem = libc.malloc(CTX_SZ);
-		if (!mem)
-			return 0;
-		libc.memset(mem, 0, CTX_SZ);
-		stack_start = (char *)mem + CTX_SZ - sizeof(void *);
-		/* flag to let the assembly know we just set this up */
-		if (!align)
-			stack_start = (void *)((unsigned long)stack_start | 0x1);
-		libc.pthread_key_create(&s_wrapping_key, NULL);
-		if (libc.pthread_setspecific(s_wrapping_key, stack_start) < 0) {
-			libc.free(mem);
-			return 0;
-		}
+	if (!s_wrapping_key)
+		if (libc.pthread_key_create(&s_wrapping_key, NULL) != 0)
+			return;
+	mem = libc.pthread_getspecific(s_wrapping_key);
+	if (mem) {
+		libc.pthread_setspecific(s_wrapping_key, NULL);
+		libc.free(mem);
 	}
 
-	return 0;
+	/* setup space for the wrapping code to save register state */
+	mem = libc.malloc(CTX_SZ);
+	if (!mem)
+		return;
+	libc.memset(mem, 0, CTX_SZ);
+	stack_start = (char *)mem + CTX_SZ - sizeof(void *);
+	((uint32_t *)stack_start)[1] = 0x5a5a5a5a; /* "stack" canary */
+
+	if (regs) {
+		uint32_t *stk = (uint32_t *)stack_start;
+		while (slots--)
+			*stk-- = ((uint32_t *)regs)[slots];
+		//libc.memcpy(stk, regs, slots * sizeof(*stk));
+		stack_start = (void *)stk;
+	}
+
+	/* flag to let the assembly know we just set this up */
+	if (!align)
+		stack_start = (void *)((unsigned long)stack_start | 0x1);
+
+	if (libc.pthread_setspecific(s_wrapping_key, stack_start) < 0) {
+		libc.free(mem);
+		return;
+	}
 }
 
 void close_libc_iface(void)

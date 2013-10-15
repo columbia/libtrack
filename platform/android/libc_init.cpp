@@ -74,7 +74,7 @@ __attribute__((constructor)) static void __libc_preinit()
 	sym = dlsym(real_libc_dso, "__progname");
 	if (sym)
 		progname = *(const char **)sym;
-	wrapped_tracer("__constructor__(__libc_preinit)", NULL, NULL);
+	(void)wrapped_tracer("__constructor__(__libc_preinit)", NULL, 0, NULL);
 }
 
 extern "C"

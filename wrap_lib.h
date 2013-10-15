@@ -107,13 +107,15 @@ struct libc_iface {
 
 extern struct libc_iface libc;
 
-extern int init_libc_iface(struct libc_iface *iface, const char *dso_path, int align);
+extern int init_libc_iface(struct libc_iface *iface, const char *dso_path);
 
 extern void close_libc_iface(void);
 
 extern void *wrapped_dlsym(const char *libpath, void **lib_handle, const char *symbol);
 
-extern void wrapped_tracer(const char *symbol, void *regs, void *stack);
+extern int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack);
+
+extern void setup_tls_stack(int align, void *regs, int slots);
 
 extern FILE *get_log(int release);
 

@@ -351,7 +351,7 @@ include \$(CLEAR_VARS)
 LOCAL_CFLAGS := -fPIC \\
 		-DHAVE_ARM_TLS_REGISTER -DANDROID_SMP=1 \\
 		-fno-stack-protector -Werror \\
-		-DLIBNAME=${LIBPFX}${LIB} \\
+		-DLIBNAME=${LIB} \\
 		-D_IBNAM_=$(basename ${LIBPATH})
 LOCAL_CONLYFLAGS := -std=gnu99
 LOCAL_CPPFLAGS := -std=c++0x
