@@ -21,6 +21,17 @@ extern void log_backtrace(FILE *logf, const char *sym,
 /* lib-specific wrapping handlers (e.g. [v]fork in libc) */
 extern void wrap_special(const char *symbol, uint32_t *regs, uint32_t *stack);
 
+const char __attribute__((visibility("hidden")))
+* local_strrchr(const char *str, int c)
+{
+	const char *s = str;
+	while (*s++);
+	while (--s > str)
+		if ((int)*s == c)
+			return s;
+	return NULL;
+}
+
 int __attribute__((visibility("hidden")))
 local_strcmp(const char *s1, const char *s2)
 {
@@ -28,6 +39,20 @@ local_strcmp(const char *s1, const char *s2)
 		if (*s1++ == 0)
 			return (0);
 	return (*(unsigned char *)s1 - *(unsigned char *)--s2);
+}
+
+int __attribute__((visibility("hidden")))
+local_strncmp(const char *s1, const char *s2, size_t n)
+{
+	if (n == 0)
+		return 0;
+	do {
+		if (*s1 != *s2++)
+			return (*(unsigned char *)s1 - *(unsigned char *)--s2);
+		if (*s1++ == 0)
+			break;
+	} while (--n != 0);
+	return 0;
 }
 
 struct libc_iface libc __attribute__((visibility("hidden")));
@@ -106,9 +131,10 @@ FILE __attribute__((visibility("hidden"))) *get_log(int release)
 	logf = (FILE *)libc.pthread_getspecific(log_key);
 	if (!logf) {
 		char buf[256];
+		const char *nm = local_strrchr(progname, '/');
 		libc.snprintf(buf, sizeof(buf), "%s/%d.%d.%s.log",
 			      LOGFILE_PATH, libc.getpid(),
-			      libc.gettid(), progname);
+			      libc.gettid(), nm ? nm+1 : progname);
 		logf = libc.fopen(buf, "a+");
 		if (!logf)
 			return NULL;
