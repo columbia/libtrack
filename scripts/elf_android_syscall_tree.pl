@@ -33,14 +33,15 @@ my %always_wrap = ( "malloc" => 1,
 		    "dlpvalloc" => 1,
 		    "dlfree" => 1,
 		    "sigaction" => 1,
-		    "pthread_mutex_lock" => 1,
-		    "pthread_mutex_trylock" => 1,
-		    "pthread_mutex_unlock" => 1,
-		    "pthread_rwlock_rdlock" => 1,
-		    "pthread_rwlock_tryrdlock" => 1,
-		    "pthread_rwlock_wrlock" => 1,
-		    "pthread_rwlock_trywrlock" => 1,
-		    "pthread_rwlock_unlock" => 1,
+# Having these in the logs makes the logs almost unuseable...
+#		    "pthread_mutex_lock" => 1,
+#		    "pthread_mutex_trylock" => 1,
+#		    "pthread_mutex_unlock" => 1,
+#		    "pthread_rwlock_rdlock" => 1,
+#		    "pthread_rwlock_tryrdlock" => 1,
+#		    "pthread_rwlock_wrlock" => 1,
+#		    "pthread_rwlock_trywrlock" => 1,
+#		    "pthread_rwlock_unlock" => 1,
 		  );
 
 # must be kept in-sync with wraplib.sh should_wrap_android_elf bash function
