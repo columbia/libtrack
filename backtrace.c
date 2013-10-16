@@ -13,7 +13,7 @@
 
 extern struct libc_iface libc;
 
-#define FRAMES_TO_SKIP 3
+#define FRAMES_TO_SKIP 2
 #define MAX_BT_FRAMES 64
 
 struct bt_frame {
@@ -182,18 +182,15 @@ static void unwind_backtrace(FILE *logf, const char *sym, struct timeval *tv)
 }
 
 void __attribute__((visibility("hidden")))
-log_backtrace(FILE *logf, const char *sym, uint32_t *regs, uint32_t *stack)
+log_backtrace(FILE *logf, const char *sym, uint32_t *regs, struct timeval *tv)
 {
-	struct timeval tv;
-
-	libc.gettimeofday(&tv, NULL);
 
 	/* TODO: maybe print out function arguments? */
 
 	if (libc.backtrace)
-		std_backtrace(logf, sym, &tv);
+		std_backtrace(logf, sym, tv);
 	else if (libc._Unwind_Backtrace)
-		unwind_backtrace(logf, sym, &tv);
+		unwind_backtrace(logf, sym, tv);
 	else
-		__log_print(&tv, logf, "CALL", "%s", sym);
+		__log_print(tv, logf, "CALL", "%s", sym);
 }

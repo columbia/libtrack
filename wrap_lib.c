@@ -16,7 +16,7 @@ extern const char *progname; /* comes from real libc */
 
 /* from backtrace.c */
 extern void log_backtrace(FILE *logf, const char *sym,
-			  uint32_t *regs, uint32_t *stack);
+			  uint32_t *regs, struct timeval *tv);
 
 /* lib-specific wrapping handlers (e.g. [v]fork in libc) */
 extern int wrap_special(const char *symbol, uint32_t *regs,
@@ -38,7 +38,7 @@ local_strcmp(const char *s1, const char *s2)
 {
 	while (*s1 == *s2++)
 		if (*s1++ == 0)
-			return (0);
+			return 0;
 	return (*(unsigned char *)s1 - *(unsigned char *)--s2);
 }
 
@@ -193,8 +193,6 @@ void *wrapped_dlsym(const char *libpath, void **lib_handle, const char *symbol)
 	return sym;
 }
 
-pthread_key_t wrap_key __attribute__((visibility("hidden"))) = (pthread_key_t)(-1);
-
 /**
  * @wrapped_tracer Default tracing function that stores a backtrace
  *
@@ -208,6 +206,7 @@ int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack)
 	int ret;
 	FILE *logf;
 	uint32_t wrapping = 0;
+	struct timeval tv;
 	int startup = (!regs && !stack);
 
 	if (!libc.dso) {
@@ -216,6 +215,9 @@ int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack)
 		else
 			setup_tls_stack(startup, NULL, 0);
 	}
+
+	libc.gettimeofday(&tv, NULL);
+
 	logf = get_log(0);
 	if (startup) {
 		log_print(logf, CALL, "%s", symbol);
@@ -223,23 +225,9 @@ int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack)
 		return 0;
 	}
 
-	if (wrap_key == (pthread_key_t)(-1)) {
-		libc.pthread_key_create(&wrap_key, NULL);
-		libc.pthread_setspecific(wrap_key, (const void *)0);
-	}
-
-	/* quick check for recursive calls */
-	wrapping = (uint32_t)libc.pthread_getspecific(wrap_key);
-	if (wrapping)
-		return 0;
-
-	libc.pthread_setspecific(wrap_key, (const void *)1);
-
-	log_backtrace(logf, symbol, (uint32_t *)regs, (uint32_t *)stack);
+	log_backtrace(logf, symbol, (uint32_t *)regs, &tv);
 
 	ret = wrap_special(symbol, regs, slots, stack);
-
-	libc.pthread_setspecific(wrap_key, (const void *)0);
 
 	return ret;
 }

@@ -349,6 +349,7 @@ __EOF)
 LOCAL_PATH := \$(call my-dir)
 include \$(CLEAR_VARS)
 LOCAL_CFLAGS := -fPIC \\
+		-O3 \\
 		-DHAVE_ARM_TLS_REGISTER -DANDROID_SMP=1 \\
 		-fno-stack-protector -Werror \\
 		-DLIBNAME=${LIB} \\

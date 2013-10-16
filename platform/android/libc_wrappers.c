@@ -37,17 +37,34 @@ int __attribute__((visibility("hidden")))
 wrap_special(const char *symbol, uint32_t *regs, int slots, uint32_t *stack)
 {
 	handler_func f = NULL;
+	char fc;
 
 	if (!symbol)
 		return 0;
-	if (local_strncmp("exec", symbol, 4) == 0)
-		f = handle_exec;
-	else if (local_strcmp("vfork", symbol) == 0
-		 || local_strcmp("fork", symbol) == 0)
-		f = handle_fork;
-	else if (local_strcmp("_exit", symbol) == 0
-		 || local_strcmp("exit", symbol) == 0)
-		f = handle_exit;
+
+	fc = symbol[0];
+	switch (fc) {
+	case 'e':
+		if (local_strcmp("exit", symbol) == 0)
+			f = handle_exit;
+		else if (local_strncmp("exec", symbol, 4) == 0)
+			f = handle_exec;
+		break;
+	case 'f':
+		if (local_strcmp("fork", symbol) == 0)
+			f = handle_fork;
+		break;
+	case '_':
+		if (local_strcmp("_exit", symbol) == 0)
+			f = handle_exit;
+		break;
+	case 'v':
+		if (local_strcmp("vfork", symbol) == 0)
+			f = handle_fork;
+		break;
+	default:
+		break;
+	}
 
 	if (f)
 		return f(symbol, regs, slots, stack);
