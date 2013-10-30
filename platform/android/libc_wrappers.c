@@ -121,7 +121,7 @@ static const char *wrap_ld_preload(const char *old_val)
 	libc.memcpy((void *)(p + old_sz + 1), (void *)ld_preload, ldp_sz);
 
 out:
-	libc_log("I:New LD_PRELOAD value '%s'", p);
+	/* libc_log("I:New LD_PRELOAD value '%s'", p); */
 	return p;
 }
 
@@ -176,7 +176,7 @@ static void setup_exec_env(void)
 	const char *ld_preload = LIB_PATH "/" _str(_IBNAM_)
 				 ":" LIB_PATH "/" _str(LIBNAME);
 	libc.setenv("LD_PRELOAD", ld_preload, 1);
-	libc_log("I:New LD_PRELOAD value '%s'", ld_preload);
+	/* libc_log("I:New LD_PRELOAD value '%s'", ld_preload); */
 	/* libc.setenv("LD_DEBUG", "3", 1); */
 }
 

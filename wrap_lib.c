@@ -193,6 +193,11 @@ void *wrapped_dlsym(const char *libpath, void **lib_handle, const char *symbol)
 	return sym;
 }
 
+static inline int should_log(void)
+{
+	return libc.access(ENABLE_LOG_PATH, F_OK) == 0;
+}
+
 /**
  * @wrapped_tracer Default tracing function that stores a backtrace
  *
@@ -203,33 +208,39 @@ void *wrapped_dlsym(const char *libpath, void **lib_handle, const char *symbol)
  */
 int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack)
 {
-	int ret;
-	FILE *logf;
-	uint32_t wrapping = 0;
-	struct timeval tv;
-	int startup = (!regs && !stack);
-
 	if (!libc.dso) {
 		if (init_libc_iface(&libc, LIBC_PATH) < 0)
 			BUG(0x30);
 		else
-			setup_tls_stack(startup, NULL, 0);
+			setup_tls_stack((!regs && !stack), NULL, 0);
 	}
-
-	libc.gettimeofday(&tv, NULL);
-
-	logf = get_log(0);
-	if (startup) {
-		log_print(logf, CALL, "%s", symbol);
-		libc.fflush(logf);
+	if (!should_log()) {
+		(*__errno()) = 0;
 		return 0;
 	}
 
-	log_backtrace(logf, symbol, (uint32_t *)regs, &tv);
+	{
+		int ret = 0;
+		FILE *logf;
+		struct timeval tv;
 
-	ret = wrap_special(symbol, regs, slots, stack);
 
-	return ret;
+		libc.gettimeofday(&tv, NULL);
+
+		logf = get_log(0);
+		if (!regs && !stack) {
+			log_print(logf, CALL, "%s", symbol);
+			libc.fflush(logf);
+			goto out;
+		}
+
+		log_backtrace(logf, symbol, (uint32_t *)regs, &tv);
+
+		ret = wrap_special(symbol, regs, slots, stack);
+out:
+		(*__errno()) = 0; /* reset this! */
+		return ret;
+	}
 }
 
 int init_libc_iface(struct libc_iface *iface, const char *dso_path)
@@ -276,6 +287,7 @@ int init_libc_iface(struct libc_iface *iface, const char *dso_path)
 	init_sym(iface, 1, fflush,);
 	init_sym(iface, 1, fno, fileno);
 	init_sym(iface, 1, fchmod,);
+	init_sym(iface, 1, access,);
 	init_sym(iface, 1, getpid,);
 	init_sym(iface, 1, gettid, __thread_selfid);
 	init_sym(iface, 1, pthread_key_create,);

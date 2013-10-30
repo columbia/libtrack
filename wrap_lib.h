@@ -15,6 +15,8 @@
 #define __str(x) ___str(x)
 #define _str(x) __str(x)
 
+#define EN_LOG_FILE "enable_trace_logs"
+
 #if defined(ANDROID)
 #  define LIB_PATH "/system/lib"
 #  if defined(_LIBC) && _LIBC == 1
@@ -23,6 +25,7 @@
 #    define LIBC_NAME "libc.so"
 #  endif
 #  define LOGFILE_PATH "/data/trace_logs"
+#  define ENABLE_LOG_PATH "/data/" EN_LOG_FILE
 #elif defined(__APPLE__)
 #  define LIB_PATH "/usr/lib/system"
 #  if defined(_LIBC) && _LIBC == 1
@@ -30,7 +33,8 @@
 #  else
 #    define LIBC_NAME "libc.dylib"
 #  endif
-#  define LOGFILE_PATH "/tmp"
+#  define LOGFILE_PATH "/tmp/trace_logs"
+#  define ENABLE_LOG_PATH "/tmp/" EN_LOG_FILE
 #else
 #  define LIB_PATH "/lib"
 #  if defined(_LIBC) && _LIBC == 1
@@ -38,7 +42,8 @@
 #  else
 #    define LIBC_NAME "_ibc_so"
 #  endif
-#  define LOGFILE_PATH "/tmp"
+#  define LOGFILE_PATH "/tmp/trace_logs"
+#  define ENABLE_LOG_PATH "/tmp/" EN_LOG_FILE
 #endif
 
 #define LIBC_PATH LIB_PATH "/" LIBC_NAME
@@ -67,6 +72,7 @@ struct libc_iface {
 	int (*fflush)(FILE *f);
 	int (*fno)(FILE *f);
 	int (*fchmod)(int fd, mode_t mode);
+	int (*access)(const char *path, int amode);
 
 	pid_t (*getpid)(void);
 	uint32_t (*gettid)(void);
