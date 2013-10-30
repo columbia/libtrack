@@ -101,7 +101,7 @@ static inline uintptr_t __Unwind_GetIP(_Unwind_Context* ctx)
 		_BUG(0xA0);
 	libc._Unwind_VRS_Get(ctx, _UVRSC_CORE, 15,/* 15 == pc (UNWIND_IP_REG) */
 			     _UVRSD_UINT32, &val);
-	return val & ~1; /* thumb bit */
+	return val; /* & ~1; */ /* thumb bit */
 }
 #else
 #define __Unwind_GetIP(ctx) \
