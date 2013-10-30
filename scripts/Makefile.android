@@ -1,0 +1,91 @@
+#
+# Makefile for wrapped Android libraries
+#
+
+SCRIPT ?= install_android.sh
+default: build
+
+help:
+	@echo "To install your newly compiled wrapper library"
+	@echo "simply use:"
+	@echo "\tmake install"
+	@echo ""
+	@echo "To customize the location of the installed library,"
+	@echo "use the IDIR variable, e.g.,"
+	@echo "\tmake IDIR=/system/lib/somedir install"
+	@echo ""
+
+# T and M are taken from the Android environment functions
+# gettop and findmakefile respectively
+build: T = $(shell \
+		TOPFILE=build/core/envsetup.mk ;\
+		if [ -n "$$TOP" -a -f "$$TOP/$$TOPFILE" ]; then \
+			echo $$TOP; \
+		else \
+			if [ -f $$TOPFILE ]; then \
+				PWD= /bin/pwd ; \
+			else \
+				HERE=$$PWD ;\
+				T= ;\
+				while [ \( ! \( -f $$TOPFILE \) \) -a \( $$PWD != "/" \) ]; do \
+					\cd ..; \
+					T=$$(PWD= /bin/pwd); \
+				done; \
+				\cd $$HERE; \
+				if [ -f "$$T/$$TOPFILE" ]; then \
+					echo $$T; \
+				fi; \
+			fi; \
+		fi)
+build: M = $(shell \
+		TOPFILE=build/core/envsetup.mk ; \
+		HERE=$$PWD ; \
+		T= ; \
+		while [ \( ! \( -f $$TOPFILE \) \) -a \( $$PWD != "/" \) ]; do \
+			T=$$(PWD= /bin/pwd) ; \
+			if [ -f "$$T/Android.mk" ]; then \
+				echo $$T/Android.mk ; \
+				break; \
+			fi; \
+			\cd ..; \
+		done; \
+		\cd $$HERE )
+build:
+	@if [ ! "$T" ]; then \
+		echo "Couldn't locate the top of the tree.  Try setting TOP."; \
+	elif [ ! "$M" ]; then \
+		echo "Couldn't locate a makefile from the current directory."; \
+	else \
+		ONE_SHOT_MAKEFILE=$M $(MAKE) -C $T -f build/core/main.mk all_modules; \
+	fi
+
+install: LIBDIR = $(shell pwd)
+install: IDIR ?= /data/cells/trace/system/lib
+install: CELLNAME = $(shell echo $(IDIR) | grep "/data/cells" | awk -F '/' '{print $$4}')
+install: SCRIPTPATH = $(shell \
+			dir=$$(pwd); \
+			while [ "$$dir" != "" ]; do \
+				s="$${dir}/scripts/$(SCRIPT)"; \
+				if [ -x "$$s" ]; then \
+					echo $$s; \
+					break; \
+				fi; \
+				dir=$${dir%/*}; \
+			done )
+install:
+	@if [ ! -z "$(CELLNAME)" ]; then \
+		echo "Mounting cell: '$(CELLNAME)'..."; \
+		adb shell "cell stop $(CELLNAME)"; \
+		sleep 1; \
+		adb shell "cell unmount $(CELLNAME)"; \
+		sleep 1; \
+		adb shell "cell mount $(CELLNAME)"; \
+		echo "done."; \
+		echo "Installing $(shell basename $$(pwd)) into cell:$(CELLNAME)@$(IDIR)..."; \
+	else \
+		echo "Installing $(shell basename $$(pwd)) into $(IDIR)..."; \
+	fi
+	@$(SCRIPTPATH) "$(LIBDIR)" "$(IDIR)"
+	@if [ ! -z "$(CELLNAME)" ]; then \
+		adb shell "cell unmount $(CELLNAME)"; \
+	fi

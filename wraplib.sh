@@ -396,7 +396,10 @@ __EOF)
 	ln -s "${CDIR}/wrap_lib.h" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/arch" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/platform" "${dir}" 2>/dev/null
-	echo "${ANDROID_MK}" > "${dir}/Android.mk"
+	ln -s "${CDIR}/scripts/Makefile.${ARCH}" "${dir}/Makefile" 2>/dev/null
+	if [ "${ARCH}" = "android" ]; then
+		echo "${ANDROID_MK}" > "${dir}/Android.mk"
+	fi
 
 	# start the ASM file
 	echo "${FILE_HEADER}" > "${asm}"
