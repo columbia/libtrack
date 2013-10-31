@@ -125,6 +125,14 @@ extern void setup_tls_stack(int align, void *regs, int slots);
 
 extern FILE *get_log(int release);
 
+struct log_info {
+	const char *symbol;
+	uint32_t *regs;
+	int slots;
+	void *stack;
+	struct timeval tv;
+};
+
 #define __log_print(tvptr, f, key, fmt, ...) \
 	libc.fprintf(f, "%lu.%lu:" key ":" fmt "\n", \
 		     (unsigned long)(tvptr)->tv_sec, \

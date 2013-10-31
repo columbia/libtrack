@@ -14,11 +14,11 @@ extern int local_strcmp(const char *s1, const char *s2);
 extern int local_strncmp(const char *s1, const char *s2, size_t n);
 extern pthread_key_t wrap_key;
 
-typedef int (*handler_func)(const char *sym, uint32_t *regs, int slots, uint32_t *stack);
+typedef int (*handler_func)(struct log_info *info);
 
-static int handle_exit(const char *sym, uint32_t *regs, int slots, uint32_t *stack);
-static int handle_exec(const char *sym, uint32_t *regs, int slots, uint32_t *stack);
-static int handle_fork(const char *sym, uint32_t *regs, int slots, uint32_t *stack);
+static int handle_exit(struct log_info *info);
+static int handle_exec(struct log_info *info);
+static int handle_fork(struct log_info *info);
 
 /**
  * @wrap_special - handle the wrapping of special functions
@@ -34,32 +34,32 @@ static int handle_fork(const char *sym, uint32_t *regs, int slots, uint32_t *sta
  *	>1 if it handled the wrap call, but is allowed to adjust TLS
  */
 int __attribute__((visibility("hidden")))
-wrap_special(const char *symbol, uint32_t *regs, int slots, uint32_t *stack)
+wrap_special(struct log_info *info)
 {
 	handler_func f = NULL;
 	char fc;
 
-	if (!symbol)
+	if (!info->symbol)
 		return 0;
 
-	fc = symbol[0];
+	fc = info->symbol[0];
 	switch (fc) {
 	case 'e':
-		if (local_strcmp("exit", symbol) == 0)
+		if (local_strcmp("exit", info->symbol) == 0)
 			f = handle_exit;
-		else if (local_strncmp("exec", symbol, 4) == 0)
+		else if (local_strncmp("exec", info->symbol, 4) == 0)
 			f = handle_exec;
 		break;
 	case 'f':
-		if (local_strcmp("fork", symbol) == 0)
+		if (local_strcmp("fork", info->symbol) == 0)
 			f = handle_fork;
 		break;
 	case '_':
-		if (local_strcmp("_exit", symbol) == 0)
+		if (local_strcmp("_exit", info->symbol) == 0)
 			f = handle_exit;
 		break;
 	case 'v':
-		if (local_strcmp("vfork", symbol) == 0)
+		if (local_strcmp("vfork", info->symbol) == 0)
 			f = handle_fork;
 		break;
 	default:
@@ -67,30 +67,30 @@ wrap_special(const char *symbol, uint32_t *regs, int slots, uint32_t *stack)
 	}
 
 	if (f)
-		return f(symbol, regs, slots, stack);
+		return f(info);
 	return 0;
 }
 
-static void flush_and_close(const char *msg, const char *sym, uint32_t *regs, int slots)
+static void flush_and_close(const char *msg, struct log_info *info)
 {
 	FILE *f;
 
 	f = get_log(1);
-	log_print(f, LOG, "I:%s %s(%d,%d,%d,%d)", msg, sym,
-		     regs[0], regs[1], regs[2], regs[3]);
+	log_print(f, LOG, "I:%s %s(%d,%d,%d,%d)", msg, info->symbol,
+		     info->regs[0], info->regs[1], info->regs[2], info->regs[3]);
 	libc.fflush(f);
 	libc.fclose(f);
 }
 
-int handle_exit(const char *sym, uint32_t *regs, int slots, uint32_t *stack)
+int handle_exit(struct log_info *info)
 {
-	flush_and_close("EXIT", sym, regs, slots);
+	flush_and_close("EXIT", info);
 	return 0;
 }
 
-int handle_fork(const char *sym, uint32_t *regs, int slots, uint32_t *stack)
+int handle_fork(struct log_info *info)
 {
-	flush_and_close("FORK", sym, regs, slots);
+	flush_and_close("FORK", info);
 	return 0;
 }
 
@@ -181,15 +181,15 @@ static void setup_exec_env(void)
 	/* libc.setenv("LD_DEBUG", "3", 1); */
 }
 
-int handle_exec(const char *sym, uint32_t *regs, int slots, uint32_t *stack)
+int handle_exec(struct log_info *info)
 {
-	libc_log("I:%s:%s:", sym, (const char *)regs[0]);
+	libc_log("I:%s:%s:", info->symbol, (const char *)info->regs[0]);
 
-	if (local_strcmp("execle", sym) == 0)
+	if (local_strcmp("execle", info->symbol) == 0)
 		libc_log("E:No support for execle!");
 
-	if (local_strcmp("execve", sym) == 0)
-		regs[2] = (uint32_t)wrap_environ((const char **)regs[2]);
+	if (local_strcmp("execve", info->symbol) == 0)
+		info->regs[2] = (uint32_t)wrap_environ((const char **)info->regs[2]);
 	else
 		setup_exec_env();
 

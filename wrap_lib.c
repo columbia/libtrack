@@ -15,12 +15,10 @@
 extern const char *progname; /* comes from real libc */
 
 /* from backtrace.c */
-extern void log_backtrace(FILE *logf, const char *sym,
-			  uint32_t *regs, struct timeval *tv);
+extern void log_backtrace(FILE *logf, struct log_info *info);
 
 /* lib-specific wrapping handlers (e.g. [v]fork in libc) */
-extern int wrap_special(const char *symbol, uint32_t *regs,
-			int slots, uint32_t *stack);
+extern int wrap_special(struct log_info *info);
 
 const char __attribute__((visibility("hidden")))
 * local_strrchr(const char *str, int c)
@@ -222,10 +220,10 @@ int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack)
 	{
 		int ret = 0;
 		FILE *logf;
-		struct timeval tv;
+		struct log_info li;
 
 
-		libc.gettimeofday(&tv, NULL);
+		libc.gettimeofday(&li.tv, NULL);
 
 		logf = get_log(0);
 		if (!regs && !stack) {
@@ -234,9 +232,15 @@ int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack)
 			goto out;
 		}
 
-		log_backtrace(logf, symbol, (uint32_t *)regs, &tv);
+		li.symbol = symbol;
+		li.regs = (uint32_t *)regs;
+		li.slots = slots;
+		li.stack = stack;
 
-		ret = wrap_special(symbol, regs, slots, stack);
+
+		log_backtrace(logf, &li);
+
+		ret = wrap_special(&li);
 out:
 		(*__errno()) = 0; /* reset this! */
 		return ret;

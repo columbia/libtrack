@@ -86,13 +86,13 @@ static void print_bt_state(struct bt_state *state, struct timeval *tv)
 	log_print(state->f, BT, "END");
 }
 
-static void std_backtrace(FILE *logf, const char *sym, struct timeval *tv)
+static void std_backtrace(FILE *logf, struct log_info *info)
 {
 	struct bt_state state;
 	void *frames[MAX_BT_FRAMES];
 	struct bt_frame *frame;
 	int count;
-	Dl_info info;
+	Dl_info dli;
 
 	libc.memset(&state, 0, sizeof(state));
 	state.f = logf;
@@ -101,16 +101,16 @@ static void std_backtrace(FILE *logf, const char *sym, struct timeval *tv)
 
 	for (count = 0; count < state.count; count++) {
 		frame = &state.frame[count];
-		if (dladdr(frames[count], &info) != 0) {
+		if (dladdr(frames[count], &dli) != 0) {
 			frame->pc.addr = frames[count];
-			frame->pc.symbol = info.dli_sname;
-			frame->pc.symaddr = info.dli_saddr;
-			frame->pc.libname = info.dli_fname;
-			frame->pc.libstart = info.dli_fbase;
+			frame->pc.symbol = dli.dli_sname;
+			frame->pc.symaddr = dli.dli_saddr;
+			frame->pc.libname = dli.dli_fname;
+			frame->pc.libstart = dli.dli_fbase;
 		}
 	}
 
-	print_bt_state(&state, tv);
+	print_bt_state(&state, &info->tv);
 }
 
 #ifdef __arm__
@@ -187,7 +187,7 @@ static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 }
 
 
-static void unwind_backtrace(FILE *logf, const char *sym, struct timeval *tv)
+static void unwind_backtrace(FILE *logf, struct log_info *info)
 {
 	struct bt_state state;
 
@@ -196,19 +196,18 @@ static void unwind_backtrace(FILE *logf, const char *sym, struct timeval *tv)
 
 	libc._Unwind_Backtrace(trace_func, &state);
 
-	print_bt_state(&state, tv);
+	print_bt_state(&state, &info->tv);
 }
 
 void __attribute__((visibility("hidden")))
-log_backtrace(FILE *logf, const char *sym, uint32_t *regs, struct timeval *tv)
+log_backtrace(FILE *logf, struct log_info *info)
 {
-
 	/* TODO: maybe print out function arguments? */
 
 	if (libc.backtrace)
-		std_backtrace(logf, sym, tv);
+		std_backtrace(logf, info);
 	else if (libc._Unwind_Backtrace)
-		unwind_backtrace(logf, sym, tv);
+		unwind_backtrace(logf, info);
 	else
-		__log_print(tv, logf, "CALL", "%s", sym);
+		__log_print(&info->tv, logf, "CALL", "%s", info->symbol);
 }
