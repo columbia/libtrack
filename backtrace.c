@@ -16,12 +16,16 @@ extern struct libc_iface libc;
 #define FRAMES_TO_SKIP 2
 #define MAX_BT_FRAMES 64
 
-struct bt_frame {
-	void *pc;
+struct bt_info {
+	void *addr;
 	const char *symbol;
 	void *symaddr;
 	const char *libname;
 	void *libstart;
+};
+
+struct bt_frame {
+	struct bt_info pc;
 };
 
 struct bt_state {
@@ -30,6 +34,41 @@ struct bt_state {
 	int nskip;
 	FILE *f;
 };
+
+static inline void print_info(FILE *f, int count, const char *pfx,
+			      struct bt_info *info)
+{
+	const char *sym;
+	unsigned long ofst;
+	char c;
+	if (!info->symaddr) {
+		c = '+';
+		ofst = (unsigned long)info->addr -
+			(unsigned long)info->libstart;
+	} else if ((unsigned long)info->addr >
+		   (unsigned long)info->symaddr) {
+		c = '+';
+		ofst = (unsigned long)info->addr -
+			(unsigned long)info->symaddr;
+	} else {
+		c = '-';
+		ofst = (unsigned long)info->symaddr -
+			(unsigned long)info->addr;
+	}
+	sym = info->symbol;
+	if (!sym)
+		sym = "??";
+	if (pfx)
+		libc.fprintf(f, " :%d(%s):0x%x:%s:%c0x%x:%s(%p):\n",
+			     count, pfx, (unsigned int)info->addr,
+			     info->symbol ? info->symbol : "??",
+			     c, ofst, info->libname, info->libstart);
+	else
+		libc.fprintf(f, " :%d:0x%x:%s:%c0x%x:%s(%p):\n",
+			     count, (unsigned int)info->addr,
+			     info->symbol ? info->symbol : "??",
+			     c, ofst, info->libname, info->libstart);
+}
 
 static void print_bt_state(struct bt_state *state, struct timeval *tv)
 {
@@ -42,26 +81,7 @@ static void print_bt_state(struct bt_state *state, struct timeval *tv)
 	__log_print(tv, state->f, "BT", "START");
 	for (count = 0; count < state->count; count++) {
 		frame = &state->frame[count];
-		if (!frame->symaddr) {
-			c = '+';
-			ofst = (unsigned long)frame->pc -
-				(unsigned long)frame->libstart;
-		} else if ((unsigned long)frame->pc >
-			   (unsigned long)frame->symaddr) {
-			c = '+';
-			ofst = (unsigned long)frame->pc -
-				(unsigned long)frame->symaddr;
-		} else {
-			c = '-';
-			ofst = (unsigned long)frame->symaddr -
-				(unsigned long)frame->pc;
-		}
-		sym = frame->symbol;
-		if (!sym)
-			sym = "??";
-		libc.fprintf(state->f, "  :%d:0x%x:%s:%c0x%x:%s(%p):\n",
-			     count, frame->pc, sym, c, ofst,
-			     frame->libname, frame->libstart);
+		print_info(state->f, count, NULL, &frame->pc);
 	}
 	log_print(state->f, BT, "END");
 }
@@ -82,11 +102,11 @@ static void std_backtrace(FILE *logf, const char *sym, struct timeval *tv)
 	for (count = 0; count < state.count; count++) {
 		frame = &state.frame[count];
 		if (dladdr(frames[count], &info) != 0) {
-			frame->pc = frames[count];
-			frame->symbol = info.dli_sname;
-			frame->symaddr = info.dli_saddr;
-			frame->libname = info.dli_fname;
-			frame->libstart = info.dli_fbase;
+			frame->pc.addr = frames[count];
+			frame->pc.symbol = info.dli_sname;
+			frame->pc.symaddr = info.dli_saddr;
+			frame->pc.libname = info.dli_fname;
+			frame->pc.libstart = info.dli_fbase;
 		}
 	}
 
@@ -133,6 +153,8 @@ static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 		return _URC_NO_REASON;
 	}
 
+	frame = &state->frame[state->count];
+
 #ifdef __arm__
 	/*
 	 * The instruction pointer is pointing at the instruction after the
@@ -141,24 +163,20 @@ static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 	 * to find out if the previous instruction is a Thumb-mode BLX(2).
 	 * If so subtract 2 otherwise 4 from PC.
 	 */
-	if (ip != 0) {
-		short* ptr = (short *)ip;
-		/* Thumb BLX(2) */
-		if ((*(ptr-1) & 0xff80) == 0x4780)
-			ip -= 2;
-		else
-			ip -= 4;
-	}
+	/* on ARM, we fixed GetIP to _not_ mask the thumb bit! */
+	if (ip & 0x1)
+		ip = (ip & ~0x1) - 2;
+	else
+		ip -= 4;
+
 #endif
 
-	frame = &state->frame[state->count];
-	frame->pc = (void *)ip;
-
+	frame->pc.addr = (void *)ip;
 	if (dladdr((void *)ip, &info) != 0) {
-		frame->symbol = info.dli_sname;
-		frame->symaddr = info.dli_saddr;
-		frame->libname = info.dli_fname;
-		frame->libstart = info.dli_fbase;
+		frame->pc.symbol = info.dli_sname;
+		frame->pc.symaddr = info.dli_saddr;
+		frame->pc.libname = info.dli_fname;
+		frame->pc.libstart = info.dli_fbase;
 	}
 
 	state->count++;

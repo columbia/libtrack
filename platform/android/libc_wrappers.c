@@ -74,6 +74,7 @@ wrap_special(const char *symbol, uint32_t *regs, int slots, uint32_t *stack)
 static void flush_and_close(const char *msg, const char *sym, uint32_t *regs, int slots)
 {
 	FILE *f;
+
 	f = get_log(1);
 	log_print(f, LOG, "I:%s %s(%d,%d,%d,%d)", msg, sym,
 		     regs[0], regs[1], regs[2], regs[3]);
