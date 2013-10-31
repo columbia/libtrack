@@ -39,6 +39,7 @@ LIBDIR=
 LIBTYPE=
 LIBPATH=
 OUTDIR=.
+USE_NDK=
 
 LIBPFX=real_
 
@@ -48,6 +49,7 @@ function usage() {
 	echo -e "                          [--arch {android|arm|x86}]"
 	echo -e "                          [--type {elf|macho}]"
 	echo -e "                          [--out path/to/output/dir]"
+	echo -e "                          [--use-ndk]"
 	echo -e ""
 	echo -e "\t--wrap-all                      Wrap (trace) all functions in the library"
 	echo -e "\t--arch {android|arm|x86}        Architecture for syscall wrappers"
@@ -103,6 +105,10 @@ while [[ ! -z "$1" ]]; do
 		--type )
 			LIBTYPE=$2
 			shift
+			shift
+			;;
+		--use-ndk )
+			USE_NDK=1
 			shift
 			;;
 		--out )
@@ -338,28 +344,50 @@ function __setup_wrapped_lib() {
 
 WRAP_LIB(${LIB}, ${LIBPATH})
 
-__EOF)
-
+__EOF
+)
 	FILE_FOOTER=$(cat -<<__EOF
 #include <asm/wrap_end.h>
 #undef WRAP_TRACE_FUNC
-__EOF)
-
+__EOF
+)
 	ANDROID_MK=$(cat -<<__EOF
 LOCAL_PATH := \$(call my-dir)
 include \$(CLEAR_VARS)
-LOCAL_CFLAGS := -fPIC \\
-		-O3 \\
-		-DHAVE_ARM_TLS_REGISTER -DANDROID_SMP=1 \\
-		-fno-stack-protector -Werror \\
-		-DLIBNAME=${LIB} \\
-		-D_IBNAM_=$(basename ${LIBPATH})
+LOCAL_CFLAGS := -fPIC -O3 \\
+		-DHAVE_ARM_TLS_REGISTER \\
+		-DANDROID_SMP=1 \\
+		-fno-stack-protector \\
+		-Werror \\
+		-DLIBNAME=${LIB} -D_IBNAM_=$(basename ${LIBPATH})
 LOCAL_CONLYFLAGS := -std=gnu99
 LOCAL_CPPFLAGS := -std=c++0x
+__EOF
+)
+	if [ ! -z "$USE_NDK" ]; then
+		ANDROID_MK=$(cat -<<__EOF
+$ANDROID_MK
+LOCAL_CFLAGS += -I\$(LOCAL_PATH)/platform/android/\$(TARGET_ARCH)/include \\
+		-I\$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include \\
+		-I\$(LOCAL_PATH)/platform/android/\$(TARGET_ARCH)/include \\
+		-DUSE_NDK=1
+LOCAL_LDFLAGS += -nostdlib -Wl,-nostdlib -Wl,-ldl
+__EOF
+)
+	else
+		ANDROID_MK=$(cat -<<__EOF
+$ANDROID_MK
 LOCAL_C_INCLUDE := \$(LOCAL_PATH)/platform/android/\$(TARGET_ARCH)/include
-LOCAL_ASFLAGS += -fPIC -I\$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include \\
-		 -I\$(LOCAL_PATH)/platform/android/\$(TARGET_ARCH)/include
+LOCAL_ASFLAGS += -fPIC \\
+		-I\$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include \\
+		-I\$(LOCAL_PATH)/platform/android/\$(TARGET_ARCH)/include
 LOCAL_NO_CRT := true
+__EOF
+)
+	fi
+
+	ANDROID_MK=$(cat -<<__EOF
+$ANDROID_MK
 LOCAL_SRC_FILES := \\
 		platform/android/crtbegin_so.c \\
 		$(basename "$asm") \\
@@ -369,11 +397,12 @@ LOCAL_SRC_FILES := \\
 # platform/android/__stack_chk_fail.cpp
 LOCAL_MODULE:= ${module_name}
 LOCAL_ADDITIONAL_DEPENDENCIES := \$(LOCAL_PATH)/Android.mk
-LOCAL_LDFLAGS := -L\$(LOCAL_PATH) \$(LOCAL_PATH)/${LIBPFX}${LIB} -Wl,-soname=$LIB
+LOCAL_LDFLAGS += -L\$(LOCAL_PATH) \$(LOCAL_PATH)/${LIBPFX}${LIB} -Wl,-soname=$LIB
 LOCAL_SHARED_LIBRARIES := libdl
 LOCAL_WHOLE_STATIC_LIBRARIES :=
 LOCAL_SYSTEM_SHARED_LIBRARIES :=
-__EOF)
+__EOF
+)
 	if [ "${LIB}" = "libc.so" ]; then
 		ANDROID_MK=$(cat -<<__EOF
 $ANDROID_MK
@@ -383,12 +412,31 @@ LOCAL_SRC_FILES += \\
 LOCAL_CFLAGS += -D_LIBC=1 \\
 		-DCRT_LEGACY_WORKAROUND \\
 		-DPTHREAD_DEBUG -DPTHREAD_DEBUG_ENABLED=0
-__EOF)
+__EOF
+)
 	fi
 	ANDROID_MK=$(cat -<<__EOF
 $ANDROID_MK
 include \$(BUILD_SHARED_LIBRARY)
-__EOF)
+__EOF
+)
+	if [ ! -z "$USE_NDK" ]; then
+		ANDROID_MK=$(cat -<<__EOF
+$ANDROID_MK
+\$(LOCAL_BUILT_MODULE): TARGET_LDLIBS :=
+\$(LOCAL_BUILT_MODULE): TARGET_LDFLAGS :=
+__EOF
+)
+		#echo "target=android-14" > "${dir}/../default.properties"
+		APP_MK=$(cat -<<__EOF
+APP_ABI := armeabi-v7a
+APP_PLATFORM := android-14
+APP_STL := none
+APP_OTIM := release
+__EOF
+)
+		echo -e "${APP_MK}" > "${dir}/Application.mk"
+	fi
 
 	mkdir -p "$dir" 2>/dev/null
 	ln -s "${CDIR}/backtrace.c" "${dir}" 2>/dev/null
@@ -398,11 +446,11 @@ __EOF)
 	ln -s "${CDIR}/platform" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/scripts/Makefile.${ARCH}" "${dir}/Makefile" 2>/dev/null
 	if [ "${ARCH}" = "android" ]; then
-		echo "${ANDROID_MK}" > "${dir}/Android.mk"
+		echo -e "${ANDROID_MK}" > "${dir}/Android.mk"
 	fi
 
 	# start the ASM file
-	echo "${FILE_HEADER}" > "${asm}"
+	echo -e "${FILE_HEADER}" > "${asm}"
 }
 
 
@@ -670,24 +718,32 @@ if [ -z "${LIB}" -a -d "${LIBDIR}" ]; then
 		# use path relative to 'LIBDIR'
 		_l="${l#${LIBDIR}/}"
 		__l="_${_l:1}"
-		_l_out="${OUTDIR}/${_l}/$(basename ${_l})"
-		_l_real="${OUTDIR}/${_l}/${LIBPFX}$(basename ${_l})"
-		strip_library "${l}" "${_l_real}" "${OUTDIR}/${_l}/real_syms.h"
+		_l_symdir="${OUTDIR}/${_l}"
+		if [ ! -z "$USE_NDK" ]; then
+			_l_symdir="${OUTDIR}/${_l}/jni"
+		fi
+		_l_out="${_l_symdir}/$(basename ${_l})"
+		_l_real="${_l_symdir}/$(basename ${_l})"
+		strip_library "${l}" "${_l_real}" "${_l_symdir}/real_syms.h"
 		write_wrappers "${_l_out}" "${LIB_BASE}/${__l//./_}"
 	done
 else
 	echo "Processing '$LIB'..."
 	_l=$(basename ${LIB})
 	__l="_${_l:1}"
-	_l_out="${OUTDIR}/${LIB}/${_l}"
-	_l_real="${OUTDIR}/${LIB}/${LIBPFX}${_l}"
+	_l_symdir="${OUTDIR}/${LIB}"
+	if [ ! -z "$USE_NDK" ]; then
+		_l_symdir="${OUTDIR}/${LIB}/jni"
+	fi
+	_l_out="${_l_symdir}/${_l}"
+	_l_real="${_l_symdir}/${LIBPFX}${_l}"
 	extract_code "$LIB"
 	if [ $WRAPALL -eq 0 ]; then
 		extract_syscalls "$LIB"
 		extract_syscall_tree
 	fi
 	extract_functions "$LIB"
-	strip_library "$LIB" "${_l_real}" "${OUTDIR}/${LIB}/real_syms.h"
+	strip_library "$LIB" "${_l_real}" "${_l_symdir}/real_syms.h"
 	write_wrappers "${_l_out}" "${LIB_BASE}/${__l//./_}"
 fi
 

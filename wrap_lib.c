@@ -14,6 +14,8 @@
 
 extern const char *progname; /* comes from real libc */
 
+extern volatile int*  __errno(void);
+
 /* from backtrace.c */
 extern void log_backtrace(FILE *logf, struct log_info *info);
 

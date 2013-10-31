@@ -6,6 +6,9 @@ SCRIPT ?= install_android.sh
 default: build
 
 help:
+	@echo "To build your wrapper library, use:"
+	@echo "\tmake build"
+	@echo ""
 	@echo "To install your newly compiled wrapper library"
 	@echo "simply use:"
 	@echo "\tmake install"
@@ -15,6 +18,9 @@ help:
 	@echo "\tmake IDIR=/system/lib/somedir install"
 	@echo ""
 
+IS_NDK := $(shell if [ -f Application.mk ]; then echo true; fi)
+
+ifeq ($(IS_NDK),)
 # T and M are taken from the Android environment functions
 # gettop and findmakefile respectively
 build: T = $(shell \
@@ -58,9 +64,18 @@ build:
 	else \
 		ONE_SHOT_MAKEFILE=$M $(MAKE) -C $T -f build/core/main.mk all_modules; \
 	fi
+else
+build:
+	@echo "Invoking NDK build"
+	@if [ -z "`which ndk-build`" ]; then \
+		echo "You need to put the root of your NDK install in your PATH!"; \
+	else \
+		ndk-build; \
+	fi
+endif
 
 install: LIBDIR = $(shell pwd)
-install: IDIR ?= /data/cells/trace/system/lib
+install: IDIR ?= /a/dir/that/doesnt/exist
 install: CELLNAME = $(shell echo $(IDIR) | grep "/data/cells" | awk -F '/' '{print $$4}')
 install: SCRIPTPATH = $(shell \
 			dir=$$(pwd); \
@@ -72,6 +87,11 @@ install: SCRIPTPATH = $(shell \
 				fi; \
 				dir=$${dir%/*}; \
 			done )
+ifeq ($(IS_NDK),)
+install: LIBNAME := $(shell basename $$(pwd))
+else
+install: LIBNAME := $(shell cd ../; basename $$(pwd))
+endif
 install:
 	@if [ ! -z "$(CELLNAME)" ]; then \
 		echo "Mounting cell: '$(CELLNAME)'..."; \
@@ -81,9 +101,9 @@ install:
 		sleep 1; \
 		adb shell "cell mount $(CELLNAME)"; \
 		echo "done."; \
-		echo "Installing $(shell basename $$(pwd)) into cell:$(CELLNAME)@$(IDIR)..."; \
+		echo "Installing $(LIBNAME) into cell:$(CELLNAME)@$(IDIR)..."; \
 	else \
-		echo "Installing $(shell basename $$(pwd)) into $(IDIR)..."; \
+		echo "Installing $(LIBNAME) into $(IDIR)..."; \
 	fi
 	@$(SCRIPTPATH) "$(LIBDIR)" "$(IDIR)"
 	@if [ ! -z "$(CELLNAME)" ]; then \

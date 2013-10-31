@@ -14,7 +14,6 @@
 #include <unistd.h>
 
 #include <asm/page.h>
-#include <sys/auxv.h>
 #include <sys/cdefs.h>
 
 #define _REALLY_INCLUDE_SYS__SYSTEM_PROPERTIES_H_
@@ -100,6 +99,7 @@ __noreturn void __libc_init(void* raw_args,
  * From bionic/__errno.c
  *
  */
+extern "C"
 volatile int*  __errno( void )
 {
 	return  &((volatile int*)__get_tls())[TLS_SLOT_ERRNO];

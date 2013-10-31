@@ -8,8 +8,10 @@
 #ifndef WRAP_START_H
 #define WRAP_START_H
 
+#ifndef USE_NDK
 #ifndef __ASSEMBLY__
 #error "This file should only be included in ARM assembly files"
+#endif
 #endif
 
 #include "wrap.S"

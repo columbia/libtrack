@@ -18,7 +18,14 @@ if [ -z "$libdir" -o ! -d "$libdir" ]; then
 	exit 1
 fi
 
-lib="$(basename ${libdir%/})"
+IS_NDK=
+if [ -f "${libdir}/Application.mk" ]; then
+	IS_NDK=1
+	lib="$(basename ${libdir/\/jni*})"
+else
+	lib="$(basename ${libdir%/})"
+fi
+
 _lib="_${lib:1}"
 symlnk="${_lib//./_}"
 real="${LIBPFX}$lib"
@@ -34,17 +41,23 @@ fi
 wrapper="$(cat "${libdir}/Android.mk" | grep LOCAL_MODULE | sed 's/.*=[ \t]*//').so"
 wrapper_dir=
 
-if [ ! -d "$OUT" ]; then
-	if [ -f "${libdir%/}/${wrapper}" ]; then
-		wrapper_dir="${libdir%/}"
-	else
-		echo "This script should be run from an Android build environment."
-		echo "I'm going to help you out though. Please provide the path where"
-		echo "the built 'wrapped' library '$wrapper' can be found."
-		echo -n "build dir: "
-		read wrapper_dir
+if [ ! -z "$IS_NDK" ]; then
+	_wrapper_dir=$(find "${libdir}/../libs" -type f -name *${wrapper} -exec dirname {} \;)
+	wrapper_dir="$(cd "$_wrapper_dir"; pwd)"
+else
+	if [ ! -d "$OUT" ]; then
+		if [ -f "${libdir%/}/${wrapper}" ]; then
+			wrapper_dir="${libdir%/}"
+		else
+			echo "This script should be run from an Android build environment."
+			echo "I'm going to help you out though. Please provide the path where"
+			echo "the built 'wrapped' library '$wrapper' can be found."
+			echo -n "build dir: "
+			read wrapper_dir
+		fi
 	fi
 fi
+
 if [ -z "$wrapper_dir" ]; then
 	wrapper_dir="${OUT}/system/lib"
 fi
@@ -60,12 +73,16 @@ fi
 target_lib="${destroot}/${lib}"
 replacement_lib="${destroot}/$(basename ${wrapped_path})"
 
-echo "Installing into '$destroot'..."
-$ADB push "${wrapped_path}" "${destroot}"
-$ADB push "${realpath}" "${destroot}"
-$ADB shell "rm -f '${destroot}/${symlnk}'; ln -s '${real}' '${destroot}/${symlnk}'"
-$ADB shell "chmod 644 '${replacement_lib}'; chmod 644 '${destroot}/$(basename ${realpath})'"
+echo "Installing '$wrapper' into '$destroot'..."
+$ADB push "${wrapped_path}" "${destroot}" && \
+$ADB push "${realpath}" "${destroot}" && \
+$ADB shell "rm -f '${destroot}/${symlnk}'; ln -s '${real}' '${destroot}/${symlnk}'" && \
+$ADB shell "chmod 644 '${replacement_lib}'; chmod 644 '${destroot}/$(basename ${realpath})'" && \
 echo "done."
+if [ $? -ne 0 ]; then
+	echo "Error installing to $destroot"
+	exit
+fi
 
 echo ""
 echo "I am about to overwrite ${target_lib}!"

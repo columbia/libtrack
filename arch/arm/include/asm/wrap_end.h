@@ -4,8 +4,10 @@
  *
  * finish up the wrapper entry points
  */
+#ifndef USE_NDK
 #ifndef __ASSEMBLY__
 #error "This file should only be included from ARM assembly files!"
+#endif
 #endif
 
 #undef WRAP_LIB
