@@ -13,12 +13,14 @@
 extern int local_strcmp(const char *s1, const char *s2);
 extern int local_strncmp(const char *s1, const char *s2, size_t n);
 extern pthread_key_t wrap_key;
+extern pthread_key_t s_last_stack_key;
 
 typedef int (*handler_func)(struct log_info *info);
 
 static int handle_exit(struct log_info *info);
 static int handle_exec(struct log_info *info);
 static int handle_fork(struct log_info *info);
+static int handle_pthread(struct log_info *info);
 
 /**
  * @wrap_special - handle the wrapping of special functions
@@ -64,6 +66,10 @@ wrap_special(struct log_info *info)
 	case 'v':
 		if (sc == 'f' && local_strcmp("ork", info->symbol + 2) == 0)
 			f = handle_fork;
+		break;
+	case 'p':
+		if (sc == 't' && local_strcmp("hread_create", info->symbol+2) == 0)
+			f = handle_pthread;
 		break;
 	default:
 		break;
@@ -199,5 +205,21 @@ int handle_exec(struct log_info *info)
 	libc.fflush(get_log(0));
 	//close_libc_iface();
 
+	return 0;
+}
+
+int handle_pthread(struct log_info *info)
+{
+	if (s_last_stack_key != (pthread_key_t)-1) {
+		/*
+		 * both the parent, and the new thread will
+		 * re-create the TLS "last_stack" container
+		 */
+		void *mem = libc.pthread_getspecific(s_last_stack_key);
+		if (mem) {
+			libc.free(mem);
+			libc.pthread_setspecific(s_last_stack_key, NULL);
+		}
+	}
 	return 0;
 }

@@ -131,6 +131,10 @@ struct log_info {
 	int slots;
 	void *stack;
 	struct timeval tv;
+
+	void **last_stack;
+	int   *last_stack_sz;
+	int   *last_stack_cnt;
 };
 
 #define __log_print_raw(tvptr, f, fmt, ...) \

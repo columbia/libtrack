@@ -212,16 +212,52 @@ static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 	return _URC_NO_REASON;
 }
 
+static inline int is_same_stack(struct bt_frame *current, void **last, int count)
+{
+	int i;
+	for (i = 0; i < count; i++) {
+		if (current[i].pc.addr != last[i])
+			return 0;
+	}
+	return 1;
+}
+
 
 static void unwind_backtrace(FILE *logf, struct log_info *info)
 {
 	Dl_info dli;
+	int i;
 	struct bt_state state;
 
 	libc.memset(&state, 0, sizeof(state));
 	state.f = logf;
 
 	libc._Unwind_Backtrace(trace_func, &state);
+
+	/* check the backtrace to see if it's the same as the previous one */
+	if (*(info->last_stack_sz) == state.count) {
+		if (is_same_stack(state.frame, info->last_stack, state.count)) {
+			/*
+			 * these stacks are the same - bump a counter and
+			 * don't print anything yet
+			 */
+			*(info->last_stack_cnt) += 1;
+			return;
+		}
+	}
+	/*
+	 * the current stack is a new one:
+	 *     check the last stack count - if it's > 1, print a repeat message
+	 *     reset the stats and keep the PCs for next time
+	 */
+	if (*(info->last_stack_cnt) > 1)
+		__log_print(&info->tv, state.f, "BT", "REPEAT:%d:",
+			    *(info->last_stack_cnt));
+
+	*(info->last_stack_cnt) = 1;
+	*(info->last_stack_sz) = state.count;
+	for (i = 0; i < state.count; i++)
+		info->last_stack[i] = state.frame[i].pc.addr;
 
 	state.lr.addr = (void *)info->regs[12];
 	if (state.lr.addr && dladdr((void *)info->regs[12], &dli) != 0) {
@@ -234,11 +270,30 @@ static void unwind_backtrace(FILE *logf, struct log_info *info)
 	print_bt_state(&state, &info->tv);
 }
 
+pthread_key_t s_last_stack_key = (pthread_key_t)-1;
+
 void __attribute__((visibility("hidden")))
 log_backtrace(FILE *logf, struct log_info *info)
 {
-	/* TODO: maybe print out function arguments? */
+	char *last_stack = NULL;
 
+	if (s_last_stack_key == -1)
+		if (libc.pthread_key_create(&s_last_stack_key, NULL) != 0)
+			return;
+
+	last_stack = libc.pthread_getspecific(s_last_stack_key);
+	if (!last_stack) {
+		int sz = (MAX_BT_FRAMES) * sizeof(void *) + (2 * sizeof(int));
+		last_stack = (char *)libc.malloc(sz);
+		if (!last_stack)
+			return;
+		libc.memset(last_stack, 0, sz);
+	}
+	info->last_stack_sz = (int *)last_stack;
+	info->last_stack_cnt = (int *)(last_stack + sizeof(int));
+	info->last_stack = (void **)(last_stack + 2*sizeof(int));
+
+	/* TODO: maybe print out function arguments? */
 	if (libc.backtrace)
 		std_backtrace(logf, info);
 	else if (libc._Unwind_Backtrace)
