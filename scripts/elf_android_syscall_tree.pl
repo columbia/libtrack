@@ -1,5 +1,4 @@
 #!/usr/bin/perl -w
-
 use strict;
 use warnings;
 use POSIX qw(strtol);
@@ -14,43 +13,10 @@ my %syscalls;
 my %extra_syscalls;
 my $entrypoint = "";
 
-my %always_wrap = ( "malloc" => 1,
-		    "calloc" => 1,
-		    "realloc" => 1,
-		    "realloc_in_place" => 1,
-		    "memalign" => 1,
-		    "posix_memalign" => 1,
-		    "valloc" => 1,
-		    "pvalloc" => 1,
-		    "free" => 1,
-		    "dlmalloc" => 1,
-		    "dlcalloc" => 1,
-		    "dlrealloc" => 1,
-		    "dlrealloc_in_place" => 1,
-		    "dlmemalign" => 1,
-		    "dlposix_memalign" => 1,
-		    "dlvalloc" => 1,
-		    "dlpvalloc" => 1,
-		    "dlfree" => 1,
-		    "sigaction" => 1,
-# Having these in the logs makes the logs almost unuseable...
-#		    "pthread_mutex_lock" => 1,
-#		    "pthread_mutex_trylock" => 1,
-#		    "pthread_mutex_unlock" => 1,
-#		    "pthread_rwlock_rdlock" => 1,
-#		    "pthread_rwlock_tryrdlock" => 1,
-#		    "pthread_rwlock_wrlock" => 1,
-#		    "pthread_rwlock_trywrlock" => 1,
-#		    "pthread_rwlock_unlock" => 1,
-		  );
-
-# must be kept in-sync with wraplib.sh should_wrap_android_elf bash function
-my %never_wrap = ( ".plt" => 1,
-		   "__libc_init" => 1,
-		   "__errno" => 1,
-		 );
-
-#"__aeabi_atexit" => 1,
+require "scripts/syscall_filter.pl";
+my %dowrap = always_wrap();
+my %nowrap = never_wrap();
+my %nowrap_re = never_wrap_re();
 
 sub find_syscalls {
 	my $sc_ref = shift;
@@ -66,10 +32,10 @@ sub find_syscalls {
 		# Set the entrypoint
 		if (/^[0-9a-f]+ <([^>]+)>:.*/) {
 			$entrypoint = $1;
-			if (exists $always_wrap{$entrypoint} and
+			if (exists $dowrap{$entrypoint} and
 			    !exists $extra_syscalls{$entrypoint} and
 			    !exists $syscalls{$entrypoint}) {
-			    	#print "\talways_wrap:$entrypoint\n";
+			    	#warn "\talways_wrap:$entrypoint\n";
 				$extra_syscalls{$entrypoint} = 1;
 			}
 			next;
@@ -86,7 +52,7 @@ sub find_syscalls {
 			$val = $2;
 			$ins = $3;
 			$ops = $4;
-			#print "L|$1:\t$val\t$ins\t$ops\n"
+			#warn "L|$1:\t$val\t$ins\t$ops\n"
 		} else {
 			next;
 		}
@@ -94,19 +60,18 @@ sub find_syscalls {
 		# Look for branches that target one of the syscalls
 		if ($ins =~ /^b.*/ and $ops =~ /.*<(([_a-zA-Z]\w*)(\+0x[0-9a-fA-F]+)*)>.*/) {
 			my $sc = $2;
-			#print "\t\t(b:$sc)\n";
+			#warn "\t\t(b:$sc)\n";
 			if ($sc eq $entrypoint) {
 				# recursive function or in-function branch
-				#print "\t\t(r:$sc)\n";
+				#warn "\t\t(r:$sc)\n";
 				next;
 			}
-			if ($entrypoint =~ /.*[^c]lock$/) {
-				#print "\t(skipping $entrypoint)\n";
-				next;
+			if (exists $nowrap{$entrypoint}) { next; }
+			my $dowrap = 1;
+			foreach my $re (keys %nowrap_re) {
+				if ($entrypoint =~ m/$re/) { $dowrap = 0; last; }
 			}
-			if (exists $never_wrap{$entrypoint}) {
-				next;
-			}
+			if ($dowrap == 0) { next; }
 			if (exists $tmp_calls{$entrypoint} or
 			    exists $extra_syscalls{$entrypoint} or
 			    exists $syscalls{$entrypoint} or
@@ -116,7 +81,7 @@ sub find_syscalls {
 			}
 			if (exists $$sc_ref{$sc}) {
 				# '$entrypoint' calls the system call '$sc'
-				#print "\t$entrypoint calls $sc\n";
+				# warn "\t$entrypoint calls $sc\n";
 				$tmp_calls{$entrypoint} = $sc;
 				next;
 			}

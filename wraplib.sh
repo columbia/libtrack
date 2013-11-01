@@ -479,7 +479,7 @@ function write_wrappers() {
 	__line_len=40
 	for sc in "${SYSCALLS[@]}"; do
 		fcn=${sc#*:}
-		num=${sc%:*}
+		#num=${sc%:*}
 		write_sym "WRAP" "${LIB}" "${fcn}" "${libname}"
 	done
 	echo ""
@@ -508,25 +508,6 @@ function is_syscall() {
 			return
 		fi
 	done
-}
-
-__SHOULD_WRAP=0
-function should_wrap_android_elf() {
-	local fcn="$1"
-
-	__SHOULD_WRAP=1
-	if [ "$fcn" = ".plt" ]; then
-		__SHOULD_WRAP=0
-		return
-	fi
-	if [ "$fcn" = "__libc_init" ]; then
-		__SHOULD_WRAP=0
-		return;
-	fi
-	if [ "$fcn" = "__errno" ]; then
-		__SHOULD_WRAP=0
-		return;
-	fi
 }
 
 #
@@ -577,8 +558,7 @@ function elf_functions() {
 	for idx in $FUNCTIONS_SEQ; do
 		fcn="${entries[$idx]}"
 		is_syscall "$fcn"
-		should_wrap_${ARCH}_${LIBTYPE} "$fcn"
-		if [ $__FOUND_SYSCALL -eq 0 -a $__SHOULD_WRAP -eq 1 ]; then
+		if [ $__FOUND_SYSCALL -eq 0 ]; then
 			FUNCTIONS+=( "$fcn" )
 		fi
 	done

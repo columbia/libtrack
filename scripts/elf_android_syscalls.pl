@@ -1,10 +1,15 @@
 #!/usr/bin/perl -w
-
+use strict;
 use POSIX qw(strtol);
 
 my $entrypoint = "";
 my $r7;
 my $r7addr = 0;
+
+require "scripts/syscall_filter.pl";
+my %dowrap = always_wrap();
+my %nowrap = never_wrap();
+my %nowrap_re = never_wrap_re();
 
 sub print_syscall {
 	my $inum = shift;
@@ -12,6 +17,12 @@ sub print_syscall {
 	my $num;
 	my $unparsed = 0;
 	$! = 0;
+
+	if (exists $nowrap{$entry}) { return; }
+	foreach my $re (keys %nowrap_re) {
+		if ($entry =~ m/$re/) { return; }
+	}
+
 	($num, $unparsed) = strtol($inum);
 	if ($inum eq "" || $unparsed != 0 || $!) {
 		$num = -1;
