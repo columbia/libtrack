@@ -134,7 +134,7 @@ static void std_backtrace(FILE *logf, struct log_info *info)
 }
 
 #ifdef __arm__
-static inline uintptr_t __Unwind_GetIP(_Unwind_Context* ctx)
+static inline uintptr_t __Unwind_GetIP(__unwind_context *ctx)
 {
 	uint32_t val;
 	if (!libc._Unwind_VRS_Get)

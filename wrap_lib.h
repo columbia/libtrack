@@ -55,7 +55,7 @@
 
 __BEGIN_DECLS
 
-#ifdef HAVE_UNWIND_CONTEXT_STRUCT
+#if defined(HAVE_UNWIND_CONTEXT_STRUCT) || defined(__clang__)
 typedef struct _Unwind_Context __unwind_context;
 #else
 typedef _Unwind_Context __unwind_context;
@@ -102,7 +102,7 @@ struct libc_iface {
 	/* unwind interface */
 	uintptr_t (*_Unwind_GetIP)(__unwind_context *ctx);
 #ifdef __arm__
-	_Unwind_VRS_Result (*_Unwind_VRS_Get)(_Unwind_Context *context,
+	_Unwind_VRS_Result (*_Unwind_VRS_Get)(__unwind_context *context,
 					      _Unwind_VRS_RegClass regclass,
 					      uint32_t regno,
 					      _Unwind_VRS_DataRepresentation representation,

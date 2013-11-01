@@ -377,6 +377,7 @@ __EOF
 	else
 		ANDROID_MK=$(cat -<<__EOF
 $ANDROID_MK
+LOCAL_CLANG := true
 LOCAL_C_INCLUDE := \$(LOCAL_PATH)/platform/android/\$(TARGET_ARCH)/include
 LOCAL_ASFLAGS += -fPIC \\
 		-I\$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include \\
