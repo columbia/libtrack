@@ -71,11 +71,7 @@
 	.text; .globl nm; nm: .asciz val
 
 	.macro unwind_linkage
-	.save {lr}
-	/*
 	.save {r0-r11,lr}
-	.pad #68
-	*/
 	.endm
 #endif
 /* End Apple compatibility macros */
@@ -154,33 +150,15 @@ STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
  * caller's r0 (on the stack), and sp will point to a copy of the stack
  * registers.
  */
-	MACRO1(save_caller_state, reg) /* $0 = reg */
+	MACRO3(save_caller_state, r0reg, nreg, spreg)
 	unwind_linkage
 	push	{lr}
-	get_wrapping_adr ip, lr
-	ldr	lr, [sp]
-	cmp	ip, #0
-	beq	3f
-	stmfd	ip!, {r0-r11,lr}	/* emulate a stack push */
-	set_wrapping_adr ip, r0, r1
-	mov	_marg(\reg,$0), ip	/* ip = saved r0 */
-	b	4f
-
-3:
-	push	{r0-r11,lr}
-	add	lr, sp, #(14 * 4)	/* lr points to stack at time of func entry */
-	add	ip, lr, #64	/* 64-bytes back into the caller's stack */
-	/* copy the caller's stack state */
-	ldmda	ip!, {r1-r8}
-	stmdb	sp!, {r1-r8}
-	ldmda	ip!, {r1-r8}
-	stmdb	sp!, {r1-r8}
-	ldr	ip, [lr]	/* get top of orig stack (extra 4 bytes) */
-	stmdb	sp!, {ip}
-	sub	lr, #(14 * 4) /* lr = saved r0 */
-	mov	_marg(\reg,$0), lr
-	ldr	lr, [lr, #(13 * 4)]	/* restore original lr */
-4:
+	mov	lr, sp
+	push	{r0-r11}
+	mov	_marg(\r0reg,$0), sp
+	mov	_marg(\nreg,$1), #13		/* r0-r11+lr = 13 registers */
+	add	_marg(\spreg,$2), lr, #4	/* pointer to incoming stack */
+	ldr	lr, [lr]			/* restore original lr */
 	.endm /* save_caller_state */
 
 
@@ -191,30 +169,7 @@ STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
  *            saved register state
  */
 	MACRO1(restore_caller_state, reg) /* $0 = rptr */
-	push	{ip}		/* save this as it may be used outside the macro */
-	get_wrapping_adr ip, r0
-	cmp	ip, #0
-	beq	7f
-
-	/* bit0 == flag from the caller: TLS is valid, but uninitialized. */
-	tst	ip, #1
-	bic	ip, ip, #1
-	beq	8f		/* flag _not_ set: restore from TLS */
-
-	/* flags is set: reset the TLS value, and unwind the stack */
-	set_wrapping_adr ip, r0, r1
-7:	pop	{ip}
-	mov	sp, _marg(\reg,$0)	/* jumps over all saved stack space */
-	pop	{r0-r11,lr}		/* overwrites \rptr! */
-	pop	{lr}
-	b	9f
-
-8:	/* pop register state from the TLS "stack" */
-	ldm	ip!, {r0-r11,lr}	/* emulate a stack pop */
-	push	{r0}
-	set_wrapping_adr ip, lr, r0
-	pop	{r0,ip,lr}		/* lr was also pushed in save_caller_state */
-9:
+	pop	{r0-r11,lr}
 	.endm
 
 /*
@@ -245,8 +200,12 @@ STRING(marg(__wrapstr_,\wrapsym,$1), _amarg(\wrapsym,$1))
 
 	MACRO3(wrap_func_end, wraplib, wrapsym, pfx)
 ENTRY(_marg(\pfx,$2)_marg(\wrapsym,$1))
-	/* save caller args, put pointer to r0 (on stack) in r4 */
-	save_caller_state r4
+	/* save caller args:
+	 *   put pointer to r0 (on stack) in r4
+	 *   put number of registers saved in r6
+	 *   put pointer to incoming stack in r8
+	 */
+	save_caller_state r4, r6, r8
 
 	/* lookup wrapped func address */
 	symaddr	r5, marg(__wrapsym_,\wrapsym,$1)
@@ -267,12 +226,12 @@ ENTRY(_marg(\pfx,$2)_marg(\wrapsym,$1))
 5:	/* call any defined "tracing" function */
 #ifdef WRAP_TRACE_FUNC
 	/* prototype:
-	   void wrapper(const char *symbol, void *regs, void *stack);
+	   void wrapper(const char *symbol, void *regs, int slots, void *stack);
 	 */
 	symaddr r0, marg(__wrapstr_,\wrapsym,$1)
 	mov	r1, r4
-	mov	r2, #13		/* keep this in-sync with save_caller_state */
-	add	r3, sp, #4
+	mov	r2, r6
+	mov	r3, r8
 	blx	_FN(WRAP_TRACE_FUNC)
 #endif
 	/* restore registers and make the original function call */
@@ -302,7 +261,7 @@ ENTRY(_marg(\wrapsym,$1))
 	cmp	ip, #0
 	bne	6f
 	/* search for the symbol and cache it */
-	save_caller_state r4
+	save_caller_state r4, r6, r8
 	symaddr	r0, marg(__wraplib_path_,\wraplib,$0)
 	symaddr	r1, marg(__libhandle_,\wraplib,$0)
 	symaddr	r2, marg(__wrapstr_,\wrapsym,$1)

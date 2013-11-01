@@ -123,8 +123,10 @@ FILE __attribute__((visibility("hidden"))) *get_log(int release)
 	if (!libc.dso) {
 		if (init_libc_iface(&libc, LIBC_PATH) < 0)
 			_BUG(0x10);
+		/*
 		else
 			setup_tls_stack(1, NULL, 0);
+		 */
 	}
 
 	if (log_key == (pthread_key_t)(-1)) {
@@ -211,8 +213,10 @@ int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack)
 	if (!libc.dso) {
 		if (init_libc_iface(&libc, LIBC_PATH) < 0)
 			BUG(0x30);
+		/*
 		else
 			setup_tls_stack((!regs && !stack), NULL, 0);
+		 */
 	}
 	if (!should_log()) {
 		(*__errno()) = 0;
@@ -326,6 +330,7 @@ int init_libc_iface(struct libc_iface *iface, const char *dso_path)
 	return 0;
 }
 
+#if 0
 void setup_tls_stack(int align, void *regs, int slots)
 {
 	static size_t CTX_SZ = PAGE_SIZE;
@@ -365,6 +370,7 @@ void setup_tls_stack(int align, void *regs, int slots)
 		return;
 	}
 }
+#endif
 
 void close_libc_iface(void)
 {
