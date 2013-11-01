@@ -37,29 +37,32 @@ int __attribute__((visibility("hidden")))
 wrap_special(struct log_info *info)
 {
 	handler_func f = NULL;
-	char fc;
+	char fc, sc;
 
 	if (!info->symbol)
 		return 0;
 
 	fc = info->symbol[0];
+	sc = info->symbol[1];
 	switch (fc) {
 	case 'e':
-		if (local_strcmp("exit", info->symbol) == 0)
-			f = handle_exit;
-		else if (local_strncmp("exec", info->symbol, 4) == 0)
-			f = handle_exec;
+		if (sc == 'x') {
+			if (local_strcmp("it", info->symbol + 2) == 0)
+				f = handle_exit;
+			if (local_strncmp("ec", info->symbol + 2, 2) == 0)
+				f = handle_exec;
+		}
 		break;
 	case 'f':
-		if (local_strcmp("fork", info->symbol) == 0)
+		if (sc == 'o' && local_strcmp("rk", info->symbol + 2) == 0)
 			f = handle_fork;
 		break;
 	case '_':
-		if (local_strcmp("_exit", info->symbol) == 0)
+		if (sc == 'e' && local_strcmp("xit", info->symbol + 2) == 0)
 			f = handle_exit;
 		break;
 	case 'v':
-		if (local_strcmp("vfork", info->symbol) == 0)
+		if (sc == 'f' && local_strcmp("ork", info->symbol + 2) == 0)
 			f = handle_fork;
 		break;
 	default:
