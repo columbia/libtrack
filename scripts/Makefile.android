@@ -95,17 +95,25 @@ endif
 install:
 	@if [ ! -z "$(CELLNAME)" ]; then \
 		echo "Mounting cell: '$(CELLNAME)'..."; \
-		adb shell "cell stop $(CELLNAME)"; \
+		adb shell "cell stop $(CELLNAME)" >/dev/null; \
 		sleep 1; \
-		adb shell "cell unmount $(CELLNAME)"; \
+		adb shell "cell unmount $(CELLNAME)" >/dev/null; \
 		sleep 1; \
 		adb shell "cell mount $(CELLNAME)"; \
-		echo "done."; \
-		echo "Installing $(LIBNAME) into cell:$(CELLNAME)@$(IDIR)..."; \
+		if [ $$? -ne 0 ]; then \
+			OK=0; \
+			echo "Problem mounting cell '$(CELLNAME)'!"; \
+		else \
+			OK=1; \
+			echo "done."; \
+			echo "Installing $(LIBNAME) into cell:$(CELLNAME)@$(IDIR)..."; \
+		fi; \
 	else \
 		echo "Installing $(LIBNAME) into $(IDIR)..."; \
+	fi; \
+	if [ $$OK -eq 1 ]; then \
+		$(SCRIPTPATH) "$(LIBDIR)" "$(IDIR)"; \
 	fi
-	@$(SCRIPTPATH) "$(LIBDIR)" "$(IDIR)"
 	@if [ ! -z "$(CELLNAME)" ]; then \
-		adb shell "cell unmount $(CELLNAME)"; \
+		adb shell "cell unmount $(CELLNAME)" 2>/dev/null; \
 	fi

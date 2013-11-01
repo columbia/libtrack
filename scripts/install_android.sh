@@ -77,7 +77,7 @@ echo "Installing '$wrapper' into '$destroot'..."
 $ADB push "${wrapped_path}" "${destroot}" && \
 $ADB push "${realpath}" "${destroot}" && \
 $ADB shell "rm -f '${destroot}/${symlnk}'; ln -s '${real}' '${destroot}/${symlnk}'" && \
-$ADB shell "chmod 644 '${replacement_lib}'; chmod 644 '${destroot}/$(basename ${realpath})'" && \
+$ADB shell "chmod 644 '${replacement_lib}' && chmod 644 '${destroot}/$(basename ${realpath})'" && \
 echo "done."
 if [ $? -ne 0 ]; then
 	echo "Error installing to $destroot"
