@@ -510,6 +510,32 @@ function is_syscall() {
 	done
 }
 
+__SHOULD_WRAP=0
+function should_wrap_arm_macho() {
+	local fcn="$1"
+	__SHOULD_WRAP=1
+	return
+}
+
+function should_wrap_android_elf() {
+	local fcn="$1"
+	local plt_RE='.*[.@]plt$';
+
+	__SHOULD_WRAP=1
+	if [[ $fcn =~ $plt_RE ]]; then
+		__SHOULD_WRAP=0
+		return
+	fi
+	if [ "$fcn" = "__libc_init" ]; then
+		__SHOULD_WRAP=0
+		return;
+	fi
+	if [ "$fcn" = "__errno" ]; then
+		__SHOULD_WRAP=0
+		return;
+	fi
+}
+
 #
 # Find entry points in a Mach-O binary
 #
@@ -536,7 +562,8 @@ function macho_functions() {
 	FUNCTIONS=( )
 	for idx in $(seq 0 $((${#entries[@]}-1))); do
 		is_syscall "${entries[$idx]}"
-		if [ $__FOUND_SYSCALL -eq 0 ]; then
+		should_wrap_${ARCH}_${LIBTYPE} "$fcn"
+		if [ $__FOUND_SYSCALL -eq 0 -a $__SHOULD_WRAP -eq 1 ]; then
 			FUNCTIONS+=( "${entries[$idx]}" )
 		fi
 	done
@@ -558,7 +585,8 @@ function elf_functions() {
 	for idx in $FUNCTIONS_SEQ; do
 		fcn="${entries[$idx]}"
 		is_syscall "$fcn"
-		if [ $__FOUND_SYSCALL -eq 0 ]; then
+		should_wrap_${ARCH}_${LIBTYPE} "$fcn"
+		if [ $__FOUND_SYSCALL -eq 0 -a $__SHOULD_WRAP -eq 1 ]; then
 			FUNCTIONS+=( "$fcn" )
 		fi
 	done
