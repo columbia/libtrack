@@ -96,15 +96,14 @@ install:
 	@if [ ! -z "$(CELLNAME)" ]; then \
 		echo "Mounting cell: '$(CELLNAME)'..."; \
 		adb shell "cell stop $(CELLNAME)" >/dev/null; \
-		sleep 1; \
-		adb shell "cell unmount $(CELLNAME)" >/dev/null; \
-		sleep 1; \
+		sleep 3; \
 		adb shell "cell mount $(CELLNAME)"; \
 		if [ $$? -ne 0 ]; then \
 			OK=0; \
 			echo "Problem mounting cell '$(CELLNAME)'!"; \
 		else \
 			OK=1; \
+			sleep 3; \
 			echo "done."; \
 			echo "Installing $(LIBNAME) into cell:$(CELLNAME)@$(IDIR)..."; \
 		fi; \
