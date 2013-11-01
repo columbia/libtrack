@@ -228,6 +228,8 @@ int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack)
 		libc.gettimeofday(&li.tv, NULL);
 
 		logf = get_log(0);
+		if (!logf)
+			goto out;
 		if (!regs && !stack) {
 			log_print(logf, CALL, "%s", symbol);
 			libc.fflush(logf);

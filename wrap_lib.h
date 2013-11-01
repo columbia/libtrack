@@ -133,10 +133,13 @@ struct log_info {
 	struct timeval tv;
 };
 
-#define __log_print(tvptr, f, key, fmt, ...) \
-	libc.fprintf(f, "%lu.%lu:" key ":" fmt "\n", \
+#define __log_print_raw(tvptr, f, fmt, ...) \
+	libc.fprintf(f, "%lu.%lu:" fmt, \
 		     (unsigned long)(tvptr)->tv_sec, \
 		     (unsigned long)(tvptr)->tv_usec, ## __VA_ARGS__ )
+
+#define __log_print(tvptr, f, key, fmt, ...) \
+	__log_print_raw(tvptr, f, key ":" fmt "\n", ## __VA_ARGS__ )
 
 #define log_print(f, key, fmt, ...) \
 	do { \

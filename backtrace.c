@@ -14,7 +14,7 @@
 extern struct libc_iface libc;
 
 #define FRAMES_TO_SKIP 2
-#define MAX_BT_FRAMES 64
+#define MAX_BT_FRAMES 128
 
 struct bt_info {
 	void *addr;
@@ -26,10 +26,14 @@ struct bt_info {
 
 struct bt_frame {
 	struct bt_info pc;
+	unsigned long lr;
+	unsigned long sp;
+	unsigned long r7;
 };
 
 struct bt_state {
 	struct bt_frame frame[MAX_BT_FRAMES];
+	struct bt_info lr;
 	int count;
 	int nskip;
 	FILE *f;
@@ -82,7 +86,15 @@ static void print_bt_state(struct bt_state *state, struct timeval *tv)
 	for (count = 0; count < state->count; count++) {
 		frame = &state->frame[count];
 		print_info(state->f, count, NULL, &frame->pc);
+		/*
+		if (frame->lr || frame->sp || frame->r7)
+			libc.fprintf(state->f, " :%d:LR=0x%08x,SP=0x%08x,R7=0x%08x\n",
+				     count, frame->lr, frame->sp, frame->r7);
+		 */
 	}
+	if (state->count == 1 && state->lr.addr)
+		print_info(state->f, state->count, "LR", &state->lr);
+
 	log_print(state->f, BT, "END");
 }
 
@@ -108,6 +120,14 @@ static void std_backtrace(FILE *logf, struct log_info *info)
 			frame->pc.libname = dli.dli_fname;
 			frame->pc.libstart = dli.dli_fbase;
 		}
+	}
+
+	state.lr.addr = (void *)info->regs[12];
+	if (state.lr.addr && dladdr((void *)info->regs[12], &dli) != 0) {
+		state.lr.symbol = dli.dli_sname;
+		state.lr.symaddr = dli.dli_saddr;
+		state.lr.libname = dli.dli_fname;
+		state.lr.libstart = dli.dli_fbase;
 	}
 
 	print_bt_state(&state, &info->tv);
@@ -169,6 +189,12 @@ static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 	else
 		ip -= 4;
 
+	libc._Unwind_VRS_Get(context, _UVRSC_CORE, 14,
+			     _UVRSD_UINT32, &frame->lr);
+	libc._Unwind_VRS_Get(context, _UVRSC_CORE, 13,
+			     _UVRSD_UINT32, &frame->sp);
+	libc._Unwind_VRS_Get(context, _UVRSC_CORE, 7,
+			     _UVRSD_UINT32, &frame->r7);
 #endif
 
 	frame->pc.addr = (void *)ip;
@@ -189,12 +215,21 @@ static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 
 static void unwind_backtrace(FILE *logf, struct log_info *info)
 {
+	Dl_info dli;
 	struct bt_state state;
 
 	libc.memset(&state, 0, sizeof(state));
 	state.f = logf;
 
 	libc._Unwind_Backtrace(trace_func, &state);
+
+	state.lr.addr = (void *)info->regs[12];
+	if (state.lr.addr && dladdr((void *)info->regs[12], &dli) != 0) {
+		state.lr.symbol = dli.dli_sname;
+		state.lr.symaddr = dli.dli_saddr;
+		state.lr.libname = dli.dli_fname;
+		state.lr.libstart = dli.dli_fbase;
+	}
 
 	print_bt_state(&state, &info->tv);
 }

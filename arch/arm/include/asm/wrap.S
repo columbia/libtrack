@@ -158,17 +158,17 @@ STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
 	unwind_linkage
 	push	{lr}
 	get_wrapping_adr ip, lr
+	ldr	lr, [sp]
 	cmp	ip, #0
 	beq	3f
-	stmfd	ip!, {r0-r11}		/* emulate a stack push */
+	stmfd	ip!, {r0-r11,lr}	/* emulate a stack push */
 	set_wrapping_adr ip, r0, r1
 	mov	_marg(\reg,$0), ip	/* ip = saved r0 */
-	ldr	lr, [sp, #4]		/* restore original lr */
 	b	4f
 
 3:
-	push	{r0-r11}
-	add	lr, sp, #(13 * 4)	/* lr points to stack at time of func entry */
+	push	{r0-r11,lr}
+	add	lr, sp, #(14 * 4)	/* lr points to stack at time of func entry */
 	add	ip, lr, #64	/* 64-bytes back into the caller's stack */
 	/* copy the caller's stack state */
 	ldmda	ip!, {r1-r8}
@@ -177,9 +177,9 @@ STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
 	stmdb	sp!, {r1-r8}
 	ldr	ip, [lr]	/* get top of orig stack (extra 4 bytes) */
 	stmdb	sp!, {ip}
-	sub	lr, #(13 * 4) /* lr = saved r0 */
+	sub	lr, #(14 * 4) /* lr = saved r0 */
 	mov	_marg(\reg,$0), lr
-	ldr	lr, [lr, #(12 * 4)]	/* restore original lr */
+	ldr	lr, [lr, #(13 * 4)]	/* restore original lr */
 4:
 	.endm /* save_caller_state */
 
@@ -206,13 +206,14 @@ STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
 7:	pop	{ip}
 	mov	sp, _marg(\reg,$0)	/* jumps over all saved stack space */
 	pop	{r0-r11,lr}		/* overwrites \rptr! */
+	pop	{lr}
 	b	9f
 
 8:	/* pop register state from the TLS "stack" */
-	ldm	ip!, {r0-r11}	/* emulate a stack pop */
+	ldm	ip!, {r0-r11,lr}	/* emulate a stack pop */
 	push	{r0}
 	set_wrapping_adr ip, lr, r0
-	pop	{r0,ip,lr}
+	pop	{r0,ip,lr}		/* lr was also pushed in save_caller_state */
 9:
 	.endm
 
@@ -271,7 +272,7 @@ ENTRY(_marg(\pfx,$2)_marg(\wrapsym,$1))
 	symaddr r0, marg(__wrapstr_,\wrapsym,$1)
 	mov	r1, r4
 	mov	r2, #13		/* keep this in-sync with save_caller_state */
-	mov	r3, sp
+	add	r3, sp, #4
 	blx	_FN(WRAP_TRACE_FUNC)
 #endif
 	/* restore registers and make the original function call */
