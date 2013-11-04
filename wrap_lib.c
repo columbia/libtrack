@@ -307,6 +307,8 @@ int init_libc_iface(struct libc_iface *iface, const char *dso_path)
 	init_sym(iface, 1, setenv,);
 	init_sym(iface, 1, getenv,);
 
+	init_sym(iface, 0, strsignal,);
+
 	/* backtrace interface */
 	init_sym(iface, 0, backtrace,);
 	init_sym(iface, 0, backtrace_symbols,);

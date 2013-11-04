@@ -5,6 +5,7 @@
  * Specially handled libc entry points
  *
  */
+#include <signal.h>
 #include <unistd.h>
 #include <sys/types.h>
 
@@ -21,6 +22,8 @@ static int handle_exit(struct log_info *info);
 static int handle_exec(struct log_info *info);
 static int handle_fork(struct log_info *info);
 static int handle_pthread(struct log_info *info);
+static int handle_signal(struct log_info *info);
+static int handle_sigaction(struct log_info *info);
 
 /**
  * @wrap_special - handle the wrapping of special functions
@@ -70,6 +73,21 @@ wrap_special(struct log_info *info)
 	case 'p':
 		if (sc == 't' && local_strcmp("hread_create", info->symbol+2) == 0)
 			f = handle_pthread;
+		break;
+	case 'b':
+		if (sc == 's' && local_strcmp("d_signal", info->symbol+2) == 0)
+			f = handle_signal;
+		break;
+	case 's':
+		if (sc == 'i') {
+			if (local_strcmp("gaction", info->symbol+2) == 0)
+				f = handle_sigaction;
+			else if (local_strcmp("gnal", info->symbol+2) == 0)
+				f = handle_signal;
+		} else if (sc == 'y') {
+			if (local_strcmp("sv_signal", info->symbol+2) == 0)
+				f = handle_signal;
+		}
 		break;
 	default:
 		break;
@@ -223,5 +241,113 @@ int handle_pthread(struct log_info *info)
 			libc.pthread_setspecific(s_last_stack_key, NULL);
 		}
 	}
+	return 0;
+}
+
+
+typedef void (*sighandler_func)(int sig, void *siginfo, void *ctx);
+typedef void (*sigaction_func)(int, struct siginfo *, void *);
+
+#define MAX_SIGNALS 32
+sighandler_func s_sighandler[MAX_SIGNALS];
+
+static inline const char *signame(int sig)
+{
+	if (libc.strsignal)
+		return libc.strsignal(sig);
+	return "UNKNOWN";
+}
+
+static void wrapped_sighandler(int sig, struct siginfo *siginfo, void *ctx)
+{
+	sighandler_func sh;
+
+	/*
+	 * put this in a separate scope in order to call the
+	 * original function with as little additional stack
+	 * usage as possible.
+	 */
+	if (should_log()) {
+		FILE *logf;
+		struct timeval tv;
+
+		libc.gettimeofday(&tv, NULL);
+		logf = get_log(0);
+		if (logf)
+			__log_print(&tv, logf, "SIG", "RCV:%d:%s:",
+				    sig, signame(sig));
+
+	}
+
+	if (sig >= MAX_SIGNALS)
+		return; /* I guess we eat this one... */
+
+	/* NOTE: siginfo and ctx may be invalid! */
+	(s_sighandler[sig])(sig, siginfo, ctx);
+}
+
+/*
+ * 'orig' should be a valid function pointer
+ */
+static int install_sighandler(struct log_info *info,
+			      int sig, sighandler_func orig)
+{
+	if (should_log()) {
+		Dl_info dli;
+		if (dladdr((void *)orig, &dli)) {
+			__log_print(&info->tv, get_log(0),
+				    "SIG", "HANDLE:%s[%p](%s@%p):%d:%s:",
+				    dli.dli_sname ? dli.dli_sname : "??",
+				    (void *)orig,
+				    dli.dli_fname ? dli.dli_fname : "xx",
+				    dli.dli_fbase ? dli.dli_fbase : (void *)0,
+				    sig, signame(sig));
+		} else {
+			__log_print(&info->tv, get_log(0),
+				    "SIG", "HANDLE:[%p]:%d:%s:",
+				    (void *)orig, sig, signame(sig));
+		}
+	}
+	if (sig < MAX_SIGNALS)
+		s_sighandler[sig] = orig;
+	return 0;
+}
+
+int handle_signal(struct log_info *info)
+{
+	sighandler_func sh = NULL;
+
+	sh = (sighandler_func)(info->regs[1]);
+	if (sh == NULL ||
+	    sh == (sighandler_func)SIG_IGN ||
+	    sh == (sighandler_func)SIG_DFL ||
+	    sh == (sighandler_func)SIG_ERR)
+		return 0;
+
+	if (install_sighandler(info, (int)info->regs[0], sh) == 0)
+		info->regs[1] = (uint32_t)wrapped_sighandler;
+
+	return 0;
+}
+
+int handle_sigaction(struct log_info *info)
+{
+	struct sigaction *sa;
+	sighandler_func sh = NULL;
+
+	sa = (struct sigaction *)(info->regs[1]);
+	if (!sa)
+		return 0;
+
+	sh = (sighandler_func)(sa->sa_sigaction);
+	if (sh == NULL ||
+	    sh == (sighandler_func)SIG_IGN ||
+	    sh == (sighandler_func)SIG_DFL ||
+	    sh == (sighandler_func)SIG_ERR)
+		return 0;
+
+	if (install_sighandler(info, (int)info->regs[0], sh) == 0)
+		sa->sa_sigaction = (sigaction_func)wrapped_sighandler;
+
 	return 0;
 }

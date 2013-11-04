@@ -96,6 +96,8 @@ struct libc_iface {
 
 	int (*gettimeofday)(struct timeval *tp, void *tzp);
 
+	char *(*strsignal)(int sig);
+
 	/* backtrace interface */
 	int (*backtrace)(void **buffer, int size);
 	char ** (*backtrace_symbols)(void *const *buffer, int size);
