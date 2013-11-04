@@ -133,7 +133,7 @@ struct log_info {
 	struct timeval tv;
 
 	void **last_stack;
-	int   *last_stack_sz;
+	int   *last_stack_depth;
 	int   *last_stack_cnt;
 };
 

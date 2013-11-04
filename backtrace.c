@@ -235,7 +235,7 @@ static void unwind_backtrace(FILE *logf, struct log_info *info)
 	libc._Unwind_Backtrace(trace_func, &state);
 
 	/* check the backtrace to see if it's the same as the previous one */
-	if (*(info->last_stack_sz) == state.count) {
+	if (*(info->last_stack_depth) == state.count) {
 		if (is_same_stack(state.frame, info->last_stack, state.count)) {
 			/*
 			 * these stacks are the same - bump a counter and
@@ -255,7 +255,7 @@ static void unwind_backtrace(FILE *logf, struct log_info *info)
 			    *(info->last_stack_cnt));
 
 	*(info->last_stack_cnt) = 1;
-	*(info->last_stack_sz) = state.count;
+	*(info->last_stack_depth) = state.count;
 	for (i = 0; i < state.count; i++)
 		info->last_stack[i] = state.frame[i].pc.addr;
 
@@ -283,13 +283,14 @@ log_backtrace(FILE *logf, struct log_info *info)
 
 	last_stack = libc.pthread_getspecific(s_last_stack_key);
 	if (!last_stack) {
-		int sz = (MAX_BT_FRAMES) * sizeof(void *) + (2 * sizeof(int));
+		int sz = ((MAX_BT_FRAMES) * sizeof(void *)) + (2 * sizeof(int));
 		last_stack = (char *)libc.malloc(sz);
 		if (!last_stack)
 			return;
 		libc.memset(last_stack, 0, sz);
+		libc.pthread_setspecific(s_last_stack_key, (void *)last_stack);
 	}
-	info->last_stack_sz = (int *)last_stack;
+	info->last_stack_depth = (int *)last_stack;
 	info->last_stack_cnt = (int *)(last_stack + sizeof(int));
 	info->last_stack = (void **)(last_stack + 2*sizeof(int));
 
