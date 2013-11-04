@@ -8,6 +8,7 @@
 #include <dlfcn.h>
 #include <stdio.h>
 #include <pthread.h>
+#include <unistd.h>
 #include <unwind.h>
 #include <sys/cdefs.h>
 
@@ -115,8 +116,6 @@ extern struct libc_iface libc;
 
 extern int init_libc_iface(struct libc_iface *iface, const char *dso_path);
 
-extern void close_libc_iface(void);
-
 extern void *wrapped_dlsym(const char *libpath, void **lib_handle, const char *symbol);
 
 extern int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack);
@@ -124,6 +123,8 @@ extern int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack
 extern void setup_tls_stack(int align, void *regs, int slots);
 
 extern FILE *get_log(int release);
+
+extern volatile int*  __errno(void);
 
 struct log_info {
 	const char *symbol;
@@ -165,6 +166,33 @@ struct log_info {
 		extern void *real_libc_dso; \
 		(void)dlsym(real_libc_dso, "LOG:" msg); \
 	} while (0)
+
+static inline void libc_close_log(void)
+{
+	FILE *f;
+	f = get_log(1);
+	if (f) {
+		log_print(f, LOG, "END");
+		libc.fflush(f);
+		libc.fclose(f);
+	}
+}
+
+static inline void libc_close_iface(void)
+{
+	if (!libc.dso)
+		return;
+	libc_close_log();
+	dlclose(libc.dso);
+	libc.dso = NULL;
+}
+
+static inline int should_log(void)
+{
+	int r = libc.access(ENABLE_LOG_PATH, F_OK) == 0;
+	(*__errno()) = 0;
+	return r;
+}
 
 __END_DECLS
 #endif

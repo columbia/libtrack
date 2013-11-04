@@ -85,7 +85,7 @@ static void flush_and_close(const char *msg, struct log_info *info)
 	FILE *f;
 
 	f = get_log(1);
-	log_print(f, LOG, "I:%s %s(%d,%d,%d,%d)", msg, info->symbol,
+	log_print(f, LOG, "I:%s %s(0x%x,0x%x,0x%x,0x%x)", msg, info->symbol,
 		     info->regs[0], info->regs[1], info->regs[2], info->regs[3]);
 	libc.fflush(f);
 	libc.fclose(f);
@@ -93,13 +93,15 @@ static void flush_and_close(const char *msg, struct log_info *info)
 
 int handle_exit(struct log_info *info)
 {
-	flush_and_close("EXIT", info);
+	if (should_log())
+		flush_and_close("EXIT", info);
 	return 0;
 }
 
 int handle_fork(struct log_info *info)
 {
-	flush_and_close("FORK", info);
+	if (should_log())
+		flush_and_close("FORK", info);
 	return 0;
 }
 
@@ -192,8 +194,6 @@ static void setup_exec_env(void)
 
 int handle_exec(struct log_info *info)
 {
-	libc_log("I:%s:%s:", info->symbol, (const char *)info->regs[0]);
-
 	if (local_strcmp("execle", info->symbol) == 0)
 		libc_log("E:No support for execle!");
 
@@ -202,8 +202,10 @@ int handle_exec(struct log_info *info)
 	else
 		setup_exec_env();
 
-	libc.fflush(get_log(0));
-	//close_libc_iface();
+	if (should_log()) {
+		libc_log("I:%s:%s:", info->symbol, (const char *)info->regs[0]);
+		libc_close_log();
+	}
 
 	return 0;
 }

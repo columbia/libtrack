@@ -14,8 +14,6 @@
 
 extern const char *progname; /* comes from real libc */
 
-extern volatile int*  __errno(void);
-
 /* from backtrace.c */
 extern void log_backtrace(FILE *logf, struct log_info *info);
 
@@ -115,9 +113,11 @@ static void *table_dlsym(void *dso, const char *sym)
 	return (void *)((char *)wrapped_dli.dli_fbase + symbol->offset);
 }
 
+
+static pthread_key_t log_key = (pthread_key_t)(-1);
+
 FILE __attribute__((visibility("hidden"))) *get_log(int release)
 {
-	static pthread_key_t log_key = (pthread_key_t)(-1);
 	FILE *logf = NULL;
 
 	if (!libc.dso) {
@@ -195,11 +195,6 @@ void *wrapped_dlsym(const char *libpath, void **lib_handle, const char *symbol)
 	return sym;
 }
 
-static inline int should_log(void)
-{
-	return libc.access(ENABLE_LOG_PATH, F_OK) == 0;
-}
-
 /**
  * @wrapped_tracer Default tracing function that stores a backtrace
  *
@@ -210,6 +205,10 @@ static inline int should_log(void)
  */
 int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack)
 {
+	int ret = 0;
+	FILE *logf;
+	struct log_info li;
+
 	if (!libc.dso) {
 		if (init_libc_iface(&libc, LIBC_PATH) < 0)
 			BUG(0x30);
@@ -218,19 +217,15 @@ int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack)
 			setup_tls_stack((!regs && !stack), NULL, 0);
 		 */
 	}
-	if (!should_log()) {
-		(*__errno()) = 0;
-		return 0;
-	}
 
-	{
-		int ret = 0;
-		FILE *logf;
-		struct log_info li;
+	li.symbol = symbol;
+	li.regs = (uint32_t *)regs;
+	li.slots = slots;
+	li.stack = stack;
+	li.tv.tv_sec = li.tv.tv_usec = 0;
 
-
+	if (should_log()) {
 		libc.gettimeofday(&li.tv, NULL);
-
 		logf = get_log(0);
 		if (!logf)
 			goto out;
@@ -240,19 +235,15 @@ int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack)
 			goto out;
 		}
 
-		li.symbol = symbol;
-		li.regs = (uint32_t *)regs;
-		li.slots = slots;
-		li.stack = stack;
-
-
 		log_backtrace(logf, &li);
-
-		ret = wrap_special(&li);
-out:
-		(*__errno()) = 0; /* reset this! */
-		return ret;
+	} else if (libc.pthread_getspecific(log_key)) {
+		libc_close_log();
 	}
+
+	ret = wrap_special(&li);
+out:
+	(*__errno()) = 0; /* reset errno: libc functions could have set it! */
+	return ret;
 }
 
 int init_libc_iface(struct libc_iface *iface, const char *dso_path)
@@ -371,19 +362,3 @@ void setup_tls_stack(int align, void *regs, int slots)
 	}
 }
 #endif
-
-void close_libc_iface(void)
-{
-	FILE *f;
-
-	if (!libc.dso)
-		return;
-	f = get_log(1);
-	if (f) {
-		log_print(f, LOG, "END");
-		libc.fflush(f);
-		libc.fclose(f);
-	}
-	dlclose(libc.dso);
-	libc.dso = NULL;
-}
