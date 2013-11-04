@@ -259,12 +259,15 @@ static void unwind_backtrace(FILE *logf, struct log_info *info)
 	for (i = 0; i < state.count; i++)
 		info->last_stack[i] = state.frame[i].pc.addr;
 
-	state.lr.addr = (void *)info->regs[12];
-	if (state.lr.addr && dladdr((void *)info->regs[12], &dli) != 0) {
-		state.lr.symbol = dli.dli_sname;
-		state.lr.symaddr = dli.dli_saddr;
-		state.lr.libname = dli.dli_fname;
-		state.lr.libstart = dli.dli_fbase;
+	/* if we only have 1 stack frame, then look at the link register */
+	if (state.count == 1) {
+		state.lr.addr = (void *)info->regs[12];
+		if (state.lr.addr && dladdr((void *)info->regs[12], &dli) != 0) {
+			state.lr.symbol = dli.dli_sname;
+			state.lr.symaddr = dli.dli_saddr;
+			state.lr.libname = dli.dli_fname;
+			state.lr.libstart = dli.dli_fbase;
+		}
 	}
 
 	print_bt_state(&state, &info->tv);
