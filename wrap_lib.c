@@ -97,7 +97,7 @@ pthread_key_t s_wrapping_key __attribute__((visibility("hidden")));
  * given DSO handle.
  *
  */
-static void *table_dlsym(void *dso, const char *sym)
+static void *table_dlsym(void *dso, const char *sym, int allow_null)
 {
 	struct symbol *symbol;
 
@@ -115,8 +115,12 @@ static void *table_dlsym(void *dso, const char *sym)
 		if (local_strcmp(symbol->name, sym) == 0)
 			break;
 	}
-	if (!symbol->name)
-		SYMERR(0x3);
+	if (!symbol->name) {
+		if (allow_null)
+			return NULL;
+		else
+			SYMERR(0x3);
+	}
 
 	return (void *)((char *)wrapped_dli.dli_fbase + symbol->offset);
 }
@@ -185,7 +189,7 @@ void *wrapped_dlsym(const char *libpath, void **lib_handle, const char *symbol)
 			BUG(0x22);
 	}
 
-	sym = table_dlsym(*lib_handle, symbol);
+	sym = table_dlsym(*lib_handle, symbol, 0);
 	if (!sym)
 		BUG(0x23);
 	return sym;
@@ -255,9 +259,9 @@ int init_libc_iface(struct libc_iface *iface, const char *dso_path)
  * if we're wrapping up libc, then we have to use the table_dlsym to find
  * entry points inside!
  */
-#define __dlsym table_dlsym
+#define __dlsym(x,y) table_dlsym(x, y, 1)
 #else
-#define __dlsym dlsym
+#define __dlsym(x,y) dlsym(x, y)
 #endif
 
 #define init_sym(iface,req,sym,alt) \
