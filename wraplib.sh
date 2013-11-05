@@ -343,6 +343,7 @@ __EOF
 		$(basename "$asm") \\
 		wrap_lib.c \\
 		backtrace.c \\
+		java_backtrace.c \\
 		platform/${ARCH}/\$(TARGET_ARCH)/crtend_so.S
 __EOF
 )
@@ -473,6 +474,9 @@ __EOF
 
 	mkdir -p "$dir" 2>/dev/null
 	ln -s "${CDIR}/backtrace.c" "${dir}" 2>/dev/null
+	ln -s "${CDIR}/backtrace.h" "${dir}" 2>/dev/null
+	ln -s "${CDIR}/java_backtrace.h" "${dir}" 2>/dev/null
+	ln -s "${CDIR}/java_backtrace.c" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/wrap_lib.c" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/wrap_lib.h" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/arch" "${dir}" 2>/dev/null

@@ -10,34 +10,18 @@
 #include <sys/types.h>
 
 #include "wrap_lib.h"
+#include "backtrace.h"
+#include "java_backtrace.h"
 
 extern struct libc_iface libc;
 
+#ifdef ANDROID
+extern struct dvm_iface  dvm;
+#else
+static struct dvm_iface  dvm;
+#endif
+
 #define FRAMES_TO_SKIP 2
-#define MAX_BT_FRAMES 128
-
-struct bt_info {
-	void *addr;
-	const char *symbol;
-	void *symaddr;
-	const char *libname;
-	void *libstart;
-};
-
-struct bt_frame {
-	struct bt_info pc;
-	unsigned long lr;
-	unsigned long sp;
-	unsigned long r7;
-};
-
-struct bt_state {
-	struct bt_frame frame[MAX_BT_FRAMES];
-	struct bt_info lr;
-	int count;
-	int nskip;
-	FILE *f;
-};
 
 static inline void print_info(FILE *f, int count, const char *pfx,
 			      struct bt_info *info)
@@ -94,6 +78,9 @@ static void print_bt_state(struct bt_state *state, struct timeval *tv)
 	}
 	if (state->count == 1 && state->lr.addr)
 		print_info(state->f, state->count, "LR", &state->lr);
+
+	if (state->dvm_bt && state->dvm_bt->count > 0)
+		print_dvm_bt(state->f, state->dvm_bt, tv);
 
 	log_print(state->f, BT, "END");
 }
@@ -228,9 +215,13 @@ static void unwind_backtrace(FILE *logf, struct log_info *info)
 	Dl_info dli;
 	int i;
 	struct bt_state state;
+	struct dvm_bt dvm_bt;
 
 	libc.memset(&state, 0, sizeof(state));
+	libc.memset(&dvm_bt, 0, sizeof(dvm_bt));
+
 	state.f = logf;
+	state.dvm_bt = &dvm_bt;
 
 	libc._Unwind_Backtrace(trace_func, &state);
 
@@ -270,6 +261,7 @@ static void unwind_backtrace(FILE *logf, struct log_info *info)
 		}
 	}
 
+	get_dvm_backtrace(&dvm, &state, &dvm_bt);
 	print_bt_state(&state, &info->tv);
 }
 
@@ -296,6 +288,10 @@ log_backtrace(FILE *logf, struct log_info *info)
 	info->last_stack_depth = (int *)last_stack;
 	info->last_stack_cnt = (int *)(last_stack + sizeof(int));
 	info->last_stack = (void **)(last_stack + 2*sizeof(int));
+
+	/* initialize Dalvik VM backtracing */
+	if (!dvm.dso)
+		init_dvm_iface(&dvm, DVM_DFLT_DSO_PATH);
 
 	/* TODO: maybe print out function arguments? */
 	if (libc.backtrace)
