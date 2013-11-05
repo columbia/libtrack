@@ -19,11 +19,10 @@
 #define _REALLY_INCLUDE_SYS__SYSTEM_PROPERTIES_H_
 #include <sys/_system_properties.h>
 
-#include "bionic_tls.h"
 #include "wrap_lib.h"
 
 void *real_libc_dso = NULL;
-const char *progname = NULL;
+extern const char *progname;
 
 /* -------------------------------------------------------------------
  *
@@ -93,15 +92,3 @@ __noreturn void __libc_init(void* raw_args,
 	/* pass the call along to the real libc */
 	real_init(raw_args, onexit, slingshot, structors);
 }
-
-/* -------------------------------------------------------------------
- *
- * From bionic/__errno.c
- *
- */
-extern "C"
-volatile int*  __errno( void )
-{
-	return  &((volatile int*)__get_tls())[TLS_SLOT_ERRNO];
-}
-

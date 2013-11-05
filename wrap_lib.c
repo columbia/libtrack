@@ -12,13 +12,21 @@
 
 #include "wrap_lib.h"
 
-extern const char *progname; /* comes from real libc */
+const char *progname = NULL;
 
 /* from backtrace.c */
 extern void log_backtrace(FILE *logf, struct log_info *info);
 
 /* lib-specific wrapping handlers (e.g. [v]fork in libc) */
+#ifdef HAVE_WRAP_SPECIAL
 extern int wrap_special(struct log_info *info);
+#else
+static inline int wrap_special(struct log_info *info)
+{
+	(void)info;
+	return 0;
+}
+#endif
 
 const char __attribute__((visibility("hidden")))
 * local_strrchr(const char *str, int c)
@@ -98,9 +106,9 @@ static void *table_dlsym(void *dso, const char *sym)
 		/* get the address of a symbol we know exists in the library */
 		sym = dlsym(dso, wrapped_sym);
 		if (!sym)
-			_BUG(0x1);
+			SYMERR(0x1);
 		if (dladdr(sym, &wrapped_dli) == 0)
-			_BUG(0x2);
+			SYMERR(0x2);
 	}
 
 	for (symbol = &sym_table[0]; symbol->name; symbol++) {
@@ -108,7 +116,7 @@ static void *table_dlsym(void *dso, const char *sym)
 			break;
 	}
 	if (!symbol->name)
-		return NULL;
+		SYMERR(0x3);
 
 	return (void *)((char *)wrapped_dli.dli_fbase + symbol->offset);
 }
@@ -153,18 +161,6 @@ FILE __attribute__((visibility("hidden"))) *get_log(int release)
 		libc.pthread_setspecific(log_key, NULL);
 	return logf;
 }
-
-#define BUG(X) \
-	do { \
-		FILE *f; \
-		f = get_log(1); \
-		if (f) { \
-			log_print(f, _BUG_, "(0x%x) at %s:%d", X, __FILE__, __LINE__); \
-			libc.fflush(f); \
-			libc.fclose(f); \
-		} \
-		_BUG(X); \
-	} while (0)
 
 /**
  * @wrapped_dlsym Locate a symbol within a library, possibly loading the lib.
@@ -309,6 +305,10 @@ int init_libc_iface(struct libc_iface *iface, const char *dso_path)
 
 	init_sym(iface, 0, strsignal,);
 
+	init_sym(iface, 0, __cxa_finalize,);
+	init_sym(iface, 0, raise,);
+	init_sym(iface, 0, abort,);
+
 	/* backtrace interface */
 	init_sym(iface, 0, backtrace,);
 	init_sym(iface, 0, backtrace_symbols,);
@@ -319,6 +319,12 @@ int init_libc_iface(struct libc_iface *iface, const char *dso_path)
 	init_sym(iface, 0, _Unwind_VRS_Get,);
 #endif
 	init_sym(iface, 0, _Unwind_Backtrace,);
+
+	if (!progname) {
+		void *sym = dlsym(iface->dso, "__progname");
+		if (sym)
+			progname = *(const char **)sym;
+	}
 
 	return 0;
 }

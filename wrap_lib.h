@@ -49,11 +49,6 @@
 
 #define LIBC_PATH LIB_PATH "/" LIBC_NAME
 
-#define _BUG(X) \
-	do { \
-		*((volatile int *)X) = X; \
-	} while (0)
-
 __BEGIN_DECLS
 
 #if defined(HAVE_UNWIND_CONTEXT_STRUCT) || defined(__clang__)
@@ -87,7 +82,7 @@ struct libc_iface {
 	int (*fprintf)(FILE *f, const char *fmt, ...);
 
 	void *(*memset)(void *b, int c, size_t len);
-	void *(*memcpy)(void *dst, void *src, size_t len);
+	void *(*memcpy)(void *dst, const void *src, size_t len);
 	void *(*malloc)(size_t size);
 	void (*free)(void *ptr);
 
@@ -97,6 +92,10 @@ struct libc_iface {
 	int (*gettimeofday)(struct timeval *tp, void *tzp);
 
 	char *(*strsignal)(int sig);
+
+	void (*__cxa_finalize)(void *dso);
+	int (*raise)(int sig);
+	void (*abort)(void);
 
 	/* backtrace interface */
 	int (*backtrace)(void **buffer, int size);
@@ -195,6 +194,31 @@ static inline int should_log(void)
 	(*__errno()) = 0;
 	return r;
 }
+
+#define _BUG(X) \
+	do { \
+		*((volatile int *)X) = X; \
+	} while (0)
+
+#define BUG(X) \
+	do { \
+		FILE *f; \
+		f = get_log(1); \
+		if (f) { \
+			log_print(f, _BUG_, "(0x%x) at %s:%d", X, __FILE__, __LINE__); \
+			libc.fflush(f); \
+			libc.fclose(f); \
+		} \
+		_BUG(X); \
+	} while (0)
+
+#ifdef _LIBC
+#define SYMERR(X) \
+	_BUG(X)
+#else
+#define SYMERR(X) \
+	BUG(X)
+#endif
 
 __END_DECLS
 #endif

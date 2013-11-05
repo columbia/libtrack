@@ -25,13 +25,15 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
+#include "bionic_tls.h"
+#include "wrap_lib.h"
 
-extern void __cxa_finalize(void *);
 extern void *__dso_handle;
 
 __attribute__((visibility("hidden"),destructor))
 void __on_dlclose() {
-  __cxa_finalize(&__dso_handle);
+	if (libc.dso && libc.__cxa_finalize)
+		libc.__cxa_finalize(&__dso_handle);
 }
 
 #ifndef CRT_LEGACY_WORKAROUND
@@ -39,3 +41,31 @@ __attribute__ ((visibility ("hidden")))
 #endif
 __attribute__ ((section (".bss")))
 void *__dso_handle = (void *) 0;
+
+/* -------------------------------------------------------------------
+ *
+ * From bionic/__errno.c
+ *
+ */
+volatile int*  __errno( void )
+{
+	return  &((volatile int*)__get_tls())[TLS_SLOT_ERRNO];
+}
+
+#ifndef _LIBC
+void *memcpy(void *dst, const void *src, size_t len)
+{
+	return libc.memcpy(dst, src, len);
+}
+
+int raise(int sig)
+{
+	return libc.raise(sig);
+}
+
+void abort(void)
+{
+	while (1)
+		libc.abort();
+}
+#endif

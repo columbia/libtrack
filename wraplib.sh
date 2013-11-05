@@ -329,6 +329,65 @@ function __setup_wrapped_lib() {
 	local asm="$2"
 	local module_name="$(basename "${asm%.*}")_wrapped"
 
+	local c_flags=$(cat <<-__EOF
+		-fPIC -O3 \\
+		-DHAVE_ARM_TLS_REGISTER \\
+		-DANDROID_SMP=1 \\
+		-fno-stack-protector \\
+		-Werror \\
+		-DLIBNAME=${LIB} -D_IBNAM_=$(basename ${LIBPATH})
+__EOF
+)
+	local src_files=$(cat <<-__EOF
+		platform/${ARCH}/crtbegin_so.c \\
+		$(basename "$asm") \\
+		wrap_lib.c \\
+		backtrace.c \\
+		platform/${ARCH}/\$(TARGET_ARCH)/crtend_so.S
+__EOF
+)
+	if [ "${ARCH}" = "android" ]; then
+		if [ "${LIB}" = "libc.so" ]; then
+			src_files=$(cat <<-__EOF
+$src_files \\
+		platform/android/libc_wrappers.c \\
+		platform/android/libc_init.cpp
+__EOF
+)
+			c_flags=$(cat <<-__EOF
+$c_flags \\
+		-D_LIBC=1 \\
+		-DHAVE_WRAP_SPECIAL \\
+		-DCRT_LEGACY_WORKAROUND \\
+		-DPTHREAD_DEBUG -DPTHREAD_DEBUG_ENABLED=0
+__EOF
+)
+		fi
+	fi
+	if [ "${ARCH}" = "android" -o "${ARCH}" = "arm" ]; then
+		c_flags=$(cat <<-__EOF
+$c_flags \\
+		-marm -mno-thumb-interwork
+__EOF
+)
+	fi
+
+	# Any special library handling functions should
+	# be placed in: platform/ARCH/LIBNAME.c
+	# (where LIBNAME includes the extention, e.g., .so or .dylib)
+	if [ -f "${CDIR}/platform/${ARCH}/${LIB}.c" ]; then
+		c_flags=$(cat <<-__EOF
+$c_flags \\
+		-DHAVE_WRAP_SPECIAL
+__EOF
+)
+		src_files=$(cat <<-__EOF
+$src_files \\
+		platform/${ARCH}/${LIB}.c
+__EOF
+)
+	fi
+
 	# We have to set these variables here to pick up
 	# any new definitions of LIB, LIBPATH, etc.
 	FILE_HEADER=$(cat -<<__EOF
@@ -354,14 +413,17 @@ __EOF
 	ANDROID_MK=$(cat -<<__EOF
 LOCAL_PATH := \$(call my-dir)
 include \$(CLEAR_VARS)
-LOCAL_CFLAGS := -fPIC -O3 \\
-		-DHAVE_ARM_TLS_REGISTER \\
-		-DANDROID_SMP=1 \\
-		-fno-stack-protector \\
-		-Werror \\
-		-DLIBNAME=${LIB} -D_IBNAM_=$(basename ${LIBPATH})
+LOCAL_CFLAGS := ${c_flags}
 LOCAL_CONLYFLAGS := -std=gnu99
 LOCAL_CPPFLAGS := -std=c++0x
+LOCAL_SRC_FILES := ${src_files}
+LOCAL_ARM_MODE := arm
+LOCAL_MODULE:= ${module_name}
+LOCAL_ADDITIONAL_DEPENDENCIES := \$(LOCAL_PATH)/Android.mk
+LOCAL_LDFLAGS := -L\$(LOCAL_PATH) \$(LOCAL_PATH)/${LIBPFX}${LIB} -Wl,-soname=$LIB
+LOCAL_SHARED_LIBRARIES := libdl
+LOCAL_WHOLE_STATIC_LIBRARIES :=
+LOCAL_SYSTEM_SHARED_LIBRARIES :=
 __EOF
 )
 	if [ ! -z "$USE_NDK" ]; then
@@ -386,35 +448,6 @@ __EOF
 )
 	fi
 
-	ANDROID_MK=$(cat -<<__EOF
-$ANDROID_MK
-LOCAL_SRC_FILES := \\
-		platform/android/crtbegin_so.c \\
-		$(basename "$asm") \\
-		wrap_lib.c \\
-		backtrace.c \\
-		platform/android/\$(TARGET_ARCH)/crtend_so.S
-# platform/android/__stack_chk_fail.cpp
-LOCAL_MODULE:= ${module_name}
-LOCAL_ADDITIONAL_DEPENDENCIES := \$(LOCAL_PATH)/Android.mk
-LOCAL_LDFLAGS += -L\$(LOCAL_PATH) \$(LOCAL_PATH)/${LIBPFX}${LIB} -Wl,-soname=$LIB
-LOCAL_SHARED_LIBRARIES := libdl
-LOCAL_WHOLE_STATIC_LIBRARIES :=
-LOCAL_SYSTEM_SHARED_LIBRARIES :=
-__EOF
-)
-	if [ "${LIB}" = "libc.so" ]; then
-		ANDROID_MK=$(cat -<<__EOF
-$ANDROID_MK
-LOCAL_SRC_FILES += \\
-		platform/android/libc_wrappers.c \\
-		platform/android/libc_init.cpp
-LOCAL_CFLAGS += -D_LIBC=1 \\
-		-DCRT_LEGACY_WORKAROUND \\
-		-DPTHREAD_DEBUG -DPTHREAD_DEBUG_ENABLED=0
-__EOF
-)
-	fi
 	ANDROID_MK=$(cat -<<__EOF
 $ANDROID_MK
 include \$(BUILD_SHARED_LIBRARY)
@@ -487,9 +520,15 @@ function write_wrappers() {
 
 	echo -e -n "\twriting ${#FUNCTIONS[@]} function wrappers"
 	__line_len=40
-	for e in "${FUNCTIONS[@]}"; do
-		write_sym "PASS" "${LIB}" "${e}" "${libname}"
-	done
+	if [ $WRAPALL -eq 1 ]; then
+		for e in "${FUNCTIONS[@]}"; do
+			write_sym "WRAP" "${LIB}" "${e}" "${libname}"
+		done
+	else
+		for e in "${FUNCTIONS[@]}"; do
+			write_sym "PASS" "${LIB}" "${e}" "${libname}"
+		done
+	fi
 	echo ""
 
 	echo "${FILE_FOOTER}" >> "${libname}"

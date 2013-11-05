@@ -61,12 +61,12 @@
 #define _amarg(arg,pos)			#arg
 #define _FN(x) concat(,x)
 #define FUNC_LBL(x) \
-	.text; .align 4; .globl _FN(x); _FN(x):
+	.text; .code 32; .align 4; .globl _FN(x); .type _FN(x), %function; _FN(x):
 #define ENTRY(x) \
 	FUNC_LBL(x); \
-	.arm; .fnstart
+	.fnstart
 #define END(x) \
-	.type _FN(x), %function; .fnend; .size _FN(x), .-_FN(x)
+	.fnend; .size _FN(x), .-_FN(x)
 #define STRING(nm, val) \
 	.text; .globl nm; nm: .asciz val
 
@@ -216,7 +216,7 @@ ENTRY(_marg(\pfx,$2)_marg(\wrapsym,$1))
 	symaddr	r0, marg(__wraplib_path_,\wraplib,$0)
 	symaddr	r1, marg(__libhandle_,\wraplib,$0)
 	symaddr	r2, marg(__wrapstr_,\wrapsym,$1)
-	blx	_FN(wrapped_dlsym)
+	bl	_FN(wrapped_dlsym)
 	cmp	r0, #0
 	beq	6f	/* will branch to original lr */
 	symaddr	r5, marg(__wrapsym_,\wrapsym,$1)
@@ -232,7 +232,7 @@ ENTRY(_marg(\pfx,$2)_marg(\wrapsym,$1))
 	mov	r1, r4
 	mov	r2, r6
 	mov	r3, r8
-	blx	_FN(WRAP_TRACE_FUNC)
+	bl	_FN(WRAP_TRACE_FUNC)
 #endif
 	/* restore registers and make the original function call */
 6:	mov	ip, r5
@@ -266,7 +266,7 @@ ENTRY(_marg(\wrapsym,$1))
 	symaddr	r1, marg(__libhandle_,\wraplib,$0)
 	symaddr	r2, marg(__wrapstr_,\wrapsym,$1)
 	mov	r5, lr
-	blx	_FN(wrapped_dlsym)
+	bl	_FN(wrapped_dlsym)
 	cmp	r0, #0
 	moveq	ip, r5	/* original lr (return to caller) */
 	beq	5f
