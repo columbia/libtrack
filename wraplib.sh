@@ -576,7 +576,7 @@ function elf_functions() {
 	local lib="$1"
 	local fcn=
 	local entries=( $(cat "$tf_code" \
-				| grep '^[0-9a-f][0-9a-f]* <[^>][^>]*>:' \
+				| grep '^[0-9a-f][0-9a-f]* <[^-@>\.][^-@>\.]*>:' \
 				| $SED 's/.*<\([^>]*\)>:/\1/') )
 	FUNCTIONS=( )
 	FUNCTIONS_SEQ="$(seq 0 $((${#entries[@]}-1)))"
