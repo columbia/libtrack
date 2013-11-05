@@ -150,9 +150,10 @@ FILE __attribute__((visibility("hidden"))) *get_log(int release)
 	if (!logf) {
 		char buf[256];
 		const char *nm = local_strrchr(progname, '/');
-		libc.snprintf(buf, sizeof(buf), "%s/%d.%d.%s.log",
+		libc.snprintf(buf, sizeof(buf), "%s/%d.%d.%s.%s.log",
 			      LOGFILE_PATH, libc.getpid(),
-			      libc.gettid(), nm ? nm+1 : progname);
+			      libc.gettid(), _str(_IBNAM_),
+			      nm ? nm+1 : progname);
 		logf = libc.fopen(buf, "a+");
 		if (!logf)
 			return NULL;
