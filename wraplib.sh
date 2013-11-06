@@ -662,9 +662,8 @@ function strip_elf_library() {
 	# Copy the input file, and modify the output file in-place
 	cp "$in" "$out"
 
-	# get a list of all the global symbols, and prefix each one with
-	# the GNU strip option "-N "
-	${ELF_OBJDUMP} -T "$out" | grep ' g' | grep .text \
+	# get a list of all the function symbols (including weakly defined symbols)
+	${ELF_OBJDUMP} -T "$out" | grep "DF\s\+\.text\s\+" \
 			| awk -F' ' '{print $6}' > "${tf_funclist}"
 
 	${ELF_READELF} -s "$out" | grep -v FUNC | grep -v UND \
