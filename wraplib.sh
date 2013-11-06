@@ -671,7 +671,7 @@ function strip_elf_library() {
 			| awk -F' ' '{print $6}' > "${tf_funclist}"
 
 	${ELF_READELF} -s "$out" | grep -v FUNC | grep -v UND \
-			| tail +4 | head -1 \
+			| tail -n +4 | head -1 \
 			| awk '{print "SAVED(0x"$2","$8")"}' > "${symtable}"
 
 	# The 'STRIP' variable here points to our custom 'elfmod.py' script
