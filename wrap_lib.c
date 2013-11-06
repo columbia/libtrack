@@ -119,7 +119,7 @@ static void *table_dlsym(void *dso, const char *sym, int allow_null)
 		if (allow_null)
 			return NULL;
 		else
-			SYMERR(0x3);
+			BUG_MSG(0x3, "Can't find '%s'!", sym);
 	}
 
 	return (void *)((char *)wrapped_dli.dli_fbase + symbol->offset);
@@ -196,6 +196,8 @@ void *wrapped_dlsym(const char *libpath, void **lib_handle, const char *symbol)
 	return sym;
 }
 
+static pthread_key_t s_tracing_key = (pthread_key_t)(-1);
+
 /**
  * @wrapped_tracer Default tracing function that stores a backtrace
  *
@@ -218,6 +220,11 @@ int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack)
 			setup_tls_stack((!regs && !stack), NULL, 0);
 		 */
 	}
+
+	/* we're already tracing - disable recursive tracing! */
+	if (libc.pthread_getspecific(s_tracing_key))
+		return 0;
+	libc.pthread_setspecific(s_tracing_key, (void *)1);
 
 	li.symbol = symbol;
 	li.regs = (uint32_t *)regs;
@@ -244,6 +251,7 @@ int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack)
 	ret = wrap_special(&li);
 out:
 	(*__errno()) = 0; /* reset errno: libc functions could have set it! */
+	libc.pthread_setspecific(s_tracing_key, NULL);
 	return ret;
 }
 
@@ -329,6 +337,13 @@ int init_libc_iface(struct libc_iface *iface, const char *dso_path)
 		void *sym = dlsym(iface->dso, "__progname");
 		if (sym)
 			progname = *(const char **)sym;
+	}
+
+#undef init_sym
+
+	if (s_tracing_key == (pthread_key_t)(-1)) {
+		iface->pthread_key_create(&s_tracing_key, NULL);
+		iface->pthread_setspecific(s_tracing_key, NULL);
 	}
 
 	return 0;

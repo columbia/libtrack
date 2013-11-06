@@ -80,7 +80,7 @@ static void print_bt_state(struct bt_state *state, struct timeval *tv)
 		print_info(state->f, state->count, "LR", &state->lr);
 
 	if (state->dvm_bt && state->dvm_bt->count > 0)
-		print_dvm_bt(state->f, state->dvm_bt, tv);
+		print_dvm_bt(&dvm, state->f, state->dvm_bt, tv);
 
 	log_print(state->f, BT, "END");
 }
@@ -233,6 +233,13 @@ static void unwind_backtrace(FILE *logf, struct log_info *info)
 			 * don't print anything yet
 			 */
 			*(info->last_stack_cnt) += 1;
+
+			/*
+			 * TODO: here we are making the assumption that an
+			 * identical native backtrace is equivalent to an
+			 * identical Java/Dalvik backtrace.
+			 * THIS MAY NOT BE TRUE!
+			 */
 			return;
 		}
 	}

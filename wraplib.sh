@@ -343,7 +343,7 @@ __EOF
 		$(basename "$asm") \\
 		wrap_lib.c \\
 		backtrace.c \\
-		java_backtrace.c \\
+		java_backtrace.cpp \\
 		platform/${ARCH}/\$(TARGET_ARCH)/crtend_so.S
 __EOF
 )
@@ -423,6 +423,7 @@ LOCAL_MODULE:= ${module_name}
 LOCAL_ADDITIONAL_DEPENDENCIES := \$(LOCAL_PATH)/Android.mk
 LOCAL_LDFLAGS := -L\$(LOCAL_PATH) \$(LOCAL_PATH)/${LIBPFX}${LIB} -Wl,-soname=$LIB
 LOCAL_SHARED_LIBRARIES := libdl
+LOCAL_STATIC_LIBRARIES := libstdc++ libstlport_static
 LOCAL_WHOLE_STATIC_LIBRARIES :=
 LOCAL_SYSTEM_SHARED_LIBRARIES :=
 __EOF
@@ -440,7 +441,10 @@ __EOF
 	else
 		ANDROID_MK=$(cat -<<__EOF
 $ANDROID_MK
-LOCAL_C_INCLUDE := \$(LOCAL_PATH)/platform/android/\$(TARGET_ARCH)/include
+LOCAL_C_INCLUDES := \$(LOCAL_PATH)/platform/android/\$(TARGET_ARCH)/include \\
+		external/stlport/stlport \\
+		bionic \\
+		bionic/libstdc++/include
 LOCAL_ASFLAGS += -fPIC \\
 		-I\$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include \\
 		-I\$(LOCAL_PATH)/platform/android/\$(TARGET_ARCH)/include
@@ -465,7 +469,7 @@ __EOF
 		APP_MK=$(cat -<<__EOF
 APP_ABI := armeabi-v7a
 APP_PLATFORM := android-14
-APP_STL := none
+APP_STL := stlport_static
 APP_OTIM := release
 __EOF
 )
@@ -476,7 +480,7 @@ __EOF
 	ln -s "${CDIR}/backtrace.c" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/backtrace.h" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/java_backtrace.h" "${dir}" 2>/dev/null
-	ln -s "${CDIR}/java_backtrace.c" "${dir}" 2>/dev/null
+	ln -s "${CDIR}/java_backtrace.cpp" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/wrap_lib.c" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/wrap_lib.h" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/arch" "${dir}" 2>/dev/null

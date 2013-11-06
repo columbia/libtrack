@@ -197,6 +197,8 @@ static inline int should_log(void)
 
 #define _BUG(X) \
 	do { \
+		if (libc.fflush) \
+			libc.fflush(NULL); \
 		*((volatile int *)X) = X; \
 	} while (0)
 
@@ -206,6 +208,19 @@ static inline int should_log(void)
 		f = get_log(1); \
 		if (f) { \
 			log_print(f, _BUG_, "(0x%x) at %s:%d", X, __FILE__, __LINE__); \
+			libc.fflush(f); \
+			libc.fclose(f); \
+		} \
+		_BUG(X); \
+	} while (0)
+
+#define BUG_MSG(X,fmt,...) \
+	do { \
+		FILE *f; \
+		f = get_log(1); \
+		if (f) { \
+			log_print(f, _BUG_, "(0x%x) at %s:%d", X, __FILE__, __LINE__); \
+			log_print(f, _BUG_, fmt, ## __VA_ARGS__ ); \
 			libc.fflush(f); \
 			libc.fclose(f); \
 		} \
