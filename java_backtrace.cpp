@@ -176,7 +176,7 @@ void get_dvm_backtrace(struct dvm_iface *dvm,
 	 */
 	cnt = bt_state->count;
 	while (--cnt >= 0) {
-		void *addr = bt_state->frame[cnt].pc.addr;
+		void *addr = bt_state->frame[cnt].pc;
 		if (_in_range(addr, dvm->dvmCallMethodSym) ||
 		    _in_range(addr, dvm->dvmCallMethodASym))
 			break;
@@ -298,12 +298,13 @@ void print_dvm_bt(struct dvm_iface *dvm, FILE *logf,
 	else if (ii > 1)
 		__log_print(tv, logf, "DVM", "BT_REPEAT:%d:", ii);
 
-	__log_print(tv, logf, "DVM", "BT_START:");
+	__log_print(tv, logf, "DVM", "BT_START:%d:", dvm_bt->count);
 	for (ii = 0; ii < dvm_bt->count; ii++) {
 		m = dvm_bt->mlist[ii];
 		name = dvm->dvmHumanReadableMethod(m, DVM_BT_GET_SIGNATURE);
 		libc.fprintf(logf, " :%d:%s:\n", ii, name.c_str());
 	}
-	__log_print(tv, logf, "DVM", "BT_END");
+
+	/* __log_print(tv, logf, "DVM", "BT_END"); */
 	return;
 }

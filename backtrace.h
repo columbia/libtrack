@@ -12,6 +12,7 @@
 
 #define MAX_BT_FRAMES 128
 
+/*
 struct bt_info {
 	void *addr;
 	const char *symbol;
@@ -19,19 +20,22 @@ struct bt_info {
 	const char *libname;
 	void *libstart;
 };
+*/
 
 struct bt_frame {
-	struct bt_info pc;
+	//struct bt_info pc;
+	void *pc;
+#ifdef VERBOSE_FRAME_INFO
+	unsigned long reg[4]
 	unsigned long lr;
 	unsigned long sp;
-	unsigned long r7;
+#endif
 };
 
 struct dvm_bt;
 
 struct bt_state {
 	struct bt_frame frame[MAX_BT_FRAMES];
-	struct bt_info lr;
 	int count;
 	int nskip;
 	struct dvm_bt *dvm_bt;

@@ -23,39 +23,37 @@ static struct dvm_iface  dvm;
 
 #define FRAMES_TO_SKIP 2
 
-static inline void print_info(FILE *f, int count, const char *pfx,
-			      struct bt_info *info)
+static inline void print_info(FILE *f, int count, void *sym)
 {
-	const char *sym;
 	unsigned long ofst;
 	char c;
-	if (!info->symaddr) {
+	Dl_info dli = { .dli_saddr = 0, .dli_fname = 0, .dli_fbase = 0 };
+
+	/*
+	 * TODO: cache symbol info somewhere!
+	 */
+	if (dladdr(sym, &dli) == 0)
+		libc.memset(&dli, 0, sizeof(dli));
+
+	if (!dli.dli_saddr) {
 		c = '+';
-		ofst = (unsigned long)info->addr -
-			(unsigned long)info->libstart;
-	} else if ((unsigned long)info->addr >
-		   (unsigned long)info->symaddr) {
+		ofst = (unsigned long)sym -
+			(unsigned long)dli.dli_fbase;
+	} else if ((unsigned long)sym >
+		   (unsigned long)dli.dli_saddr) {
 		c = '+';
-		ofst = (unsigned long)info->addr -
-			(unsigned long)info->symaddr;
+		ofst = (unsigned long)sym -
+			(unsigned long)dli.dli_saddr;
 	} else {
 		c = '-';
-		ofst = (unsigned long)info->symaddr -
-			(unsigned long)info->addr;
+		ofst = (unsigned long)dli.dli_saddr -
+			(unsigned long)sym;
 	}
-	sym = info->symbol;
-	if (!sym)
-		sym = "??";
-	if (pfx)
-		libc.fprintf(f, " :%d(%s):0x%x:%s:%c0x%x:%s(%p):\n",
-			     count, pfx, (unsigned int)info->addr,
-			     info->symbol ? info->symbol : "??",
-			     c, ofst, info->libname, info->libstart);
-	else
-		libc.fprintf(f, " :%d:0x%x:%s:%c0x%x:%s(%p):\n",
-			     count, (unsigned int)info->addr,
-			     info->symbol ? info->symbol : "??",
-			     c, ofst, info->libname, info->libstart);
+
+	libc.fprintf(f, " :%d:0x%x:%s:%c0x%x:%s(%p):\n",
+		     count, (unsigned int)sym,
+		     dli.dli_sname ? dli.dli_sname : "??",
+		     c, ofst, dli.dli_fname, dli.dli_fbase);
 }
 
 static void print_bt_state(struct bt_state *state, struct timeval *tv)
@@ -66,56 +64,37 @@ static void print_bt_state(struct bt_state *state, struct timeval *tv)
 	char c;
 	const char *sym;
 
-	__log_print(tv, state->f, "BT", "START");
+	__log_print(tv, state->f, "BT", "START:%d:", state->count);
 	for (count = 0; count < state->count; count++) {
 		frame = &state->frame[count];
-		print_info(state->f, count, NULL, &frame->pc);
-		/*
-		if (frame->lr || frame->sp || frame->r7)
-			libc.fprintf(state->f, " :%d:LR=0x%08x,SP=0x%08x,R7=0x%08x\n",
-				     count, frame->lr, frame->sp, frame->r7);
-		 */
+		print_info(state->f, count, frame->pc);
+#ifdef VERBOSE_FRAME_INFO
+		libc.fprintf(state->f, " : :R0=0x%08x,R1=0x%08x,R2=0x%08x,"
+			     "R3=0x%08x,SP=0x%08x,LR=0x%08x\n",
+			     frame->reg[0], frame->reg[1], frame->reg[2],
+			     frame->reg[3], frame->sp, frame->lr);
+#endif
 	}
-	if (state->count == 1 && state->lr.addr)
-		print_info(state->f, state->count, "LR", &state->lr);
 
 	if (state->dvm_bt && state->dvm_bt->count > 0)
 		print_dvm_bt(&dvm, state->f, state->dvm_bt, tv);
 
-	log_print(state->f, BT, "END");
+	/* log_print(state->f, BT, "END"); */
 }
 
 static void std_backtrace(FILE *logf, struct log_info *info)
 {
 	struct bt_state state;
 	void *frames[MAX_BT_FRAMES];
-	struct bt_frame *frame;
 	int count;
-	Dl_info dli;
 
 	libc.memset(&state, 0, sizeof(state));
 	state.f = logf;
 
 	state.count = libc.backtrace(frames, MAX_BT_FRAMES);
 
-	for (count = 0; count < state.count; count++) {
-		frame = &state.frame[count];
-		if (dladdr(frames[count], &dli) != 0) {
-			frame->pc.addr = frames[count];
-			frame->pc.symbol = dli.dli_sname;
-			frame->pc.symaddr = dli.dli_saddr;
-			frame->pc.libname = dli.dli_fname;
-			frame->pc.libstart = dli.dli_fbase;
-		}
-	}
-
-	state.lr.addr = (void *)info->regs[12];
-	if (state.lr.addr && dladdr((void *)info->regs[12], &dli) != 0) {
-		state.lr.symbol = dli.dli_sname;
-		state.lr.symaddr = dli.dli_saddr;
-		state.lr.libname = dli.dli_fname;
-		state.lr.libstart = dli.dli_fbase;
-	}
+	for (count = 0; count < state.count; count++)
+		state.frame[count].pc = frames[count];
 
 	print_bt_state(&state, &info->tv);
 }
@@ -145,7 +124,6 @@ static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 	struct bt_state *state = (struct bt_state *)arg;
 	struct bt_frame *frame;
 	uintptr_t ip;
-	Dl_info info;
 
 	ip = __Unwind_GetIP(context);
 
@@ -175,22 +153,23 @@ static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 		ip = (ip & ~0x1) - 2;
 	else
 		ip -= 4;
-
+#ifdef VERBOSE_FRAME_INFO
+	libc._Unwind_VRS_Get(context, _UVRSC_CORE, 0,
+			     _UVRSD_UINT32, &frame->regs[0]);
+	libc._Unwind_VRS_Get(context, _UVRSC_CORE, 1,
+			     _UVRSD_UINT32, &frame->regs[1]);
+	libc._Unwind_VRS_Get(context, _UVRSC_CORE, 2,
+			     _UVRSD_UINT32, &frame->regs[2]);
+	libc._Unwind_VRS_Get(context, _UVRSC_CORE, 3,
+			     _UVRSD_UINT32, &frame->regs[3]);
 	libc._Unwind_VRS_Get(context, _UVRSC_CORE, 14,
 			     _UVRSD_UINT32, &frame->lr);
 	libc._Unwind_VRS_Get(context, _UVRSC_CORE, 13,
 			     _UVRSD_UINT32, &frame->sp);
-	libc._Unwind_VRS_Get(context, _UVRSC_CORE, 7,
-			     _UVRSD_UINT32, &frame->r7);
+#endif
 #endif
 
-	frame->pc.addr = (void *)ip;
-	if (dladdr((void *)ip, &info) != 0) {
-		frame->pc.symbol = info.dli_sname;
-		frame->pc.symaddr = info.dli_saddr;
-		frame->pc.libname = info.dli_fname;
-		frame->pc.libstart = info.dli_fbase;
-	}
+	frame->pc = (void *)ip;
 
 	state->count++;
 
@@ -203,7 +182,7 @@ static inline int is_same_stack(struct bt_frame *current, void **last, int count
 {
 	int i;
 	for (i = 0; i < count; i++) {
-		if (current[i].pc.addr != last[i])
+		if (current[i].pc != last[i])
 			return 0;
 	}
 	return 1;
@@ -255,20 +234,10 @@ static void unwind_backtrace(FILE *logf, struct log_info *info)
 	*(info->last_stack_cnt) = 1;
 	*(info->last_stack_depth) = state.count;
 	for (i = 0; i < state.count; i++)
-		info->last_stack[i] = state.frame[i].pc.addr;
-
-	/* if we only have 1 stack frame, then look at the link register */
-	if (state.count == 1) {
-		state.lr.addr = (void *)info->regs[12];
-		if (state.lr.addr && dladdr((void *)info->regs[12], &dli) != 0) {
-			state.lr.symbol = dli.dli_sname;
-			state.lr.symaddr = dli.dli_saddr;
-			state.lr.libname = dli.dli_fname;
-			state.lr.libstart = dli.dli_fbase;
-		}
-	}
+		info->last_stack[i] = state.frame[i].pc;
 
 	get_dvm_backtrace(&dvm, &state, &dvm_bt);
+
 	print_bt_state(&state, &info->tv);
 }
 
