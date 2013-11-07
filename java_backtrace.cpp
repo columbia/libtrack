@@ -219,21 +219,6 @@ void get_dvm_backtrace(struct dvm_iface *dvm,
 			dvm_bt->count = MAX_BT_FRAMES;
 
 		dvm->dvmFillStackTraceArray(fp, dvm_bt->mlist, dvm_bt->count);
-/*
-		for (cnt = 0; cnt < dvm_bt->count; cnt++) {
-			const char *cname, *mname;
-			r = dvm->dvmDbgGetThreadFrame(self, cnt, &frame, &loc);
-			if (!r)
-				continue;
-			cname = dvm->dvmDbgGetSignature(loc.classId);
-			mname = dvm->dvmDbgGetMethodName(loc.classId,
-							 loc.methodId);
-			dvm_bt->frame[cnt].id = frame;
-			dvm_bt->frame[cnt].class_name = cname;
-			dvm_bt->frame[cnt].method_name = mname;
-			dvm_bt->frame[cnt].ofst = loc.idx;
-		}
- */
 	}
 
 	/*
@@ -241,6 +226,63 @@ void get_dvm_backtrace(struct dvm_iface *dvm,
 	 */
 	return;
 }
+
+static pthread_key_t s_dvm_stack_key = (pthread_key_t)(-1);
+
+static int compare_traces(struct dvm_iface *dvm, struct dvm_bt *dvm_bt)
+{
+	char *last_stack = NULL;
+	int ii, ret;
+	int *last_depth, *last_repeat;
+	struct Method **last_meth;
+
+	if (s_dvm_stack_key == (pthread_key_t)(-1))
+		if (libc.pthread_key_create(&s_dvm_stack_key, NULL) != 0)
+			return 0;
+
+	last_stack = libc.pthread_getspecific(s_dvm_stack_key);
+	if (!last_stack) {
+		int sz = ((MAX_BT_FRAMES) * sizeof(struct Method *))
+				+ (2 * sizeof(int));
+		last_stack = (char *)libc.malloc(sz);
+		if (!last_stack)
+			return 0;
+		libc.memset(last_stack, 0, sz);
+		libc.pthread_setspecific(s_dvm_stack_key, (void *)last_stack);
+	}
+	last_depth = (int *)last_stack;
+	last_repeat = (int *)(last_stack + sizeof(int));
+	last_meth = (struct Method **)(last_stack + 2*sizeof(int));
+
+	if (*last_depth != dvm_bt->count) {
+		/* this is _not_ a repeated trace, save it for next time */
+		ret = *last_repeat;
+		goto save_current_stack;
+	}
+
+	for (ii = 0; ii < *last_depth; ii++) {
+		if (last_meth[ii] != dvm_bt->mlist[ii]) {
+			/*
+			 * It's not a repeated trace, but we had a previously
+			 * repeating trace. Save the current stack and return
+			 * the number of times the previous stack repeated.
+			 */
+			ret = *last_repeat;
+			goto save_current_stack;
+		}
+	}
+
+	*last_repeat += 1;
+	return -1; /* repeat frame, don't print anything yet */
+
+save_current_stack:
+	*last_depth = dvm_bt->count;
+	for (ii = 0; ii < *last_depth; ii++)
+		last_meth[ii] = dvm_bt->mlist[ii];
+	*last_repeat = 1;
+	return ret;
+}
+
 
 extern "C"
 void print_dvm_bt(struct dvm_iface *dvm, FILE *logf,
@@ -250,9 +292,11 @@ void print_dvm_bt(struct dvm_iface *dvm, FILE *logf,
 	struct Method *m;
 	std::string name;
 
-	/*
-	 * TODO: check for identical Java backtraces here!
-	 */
+	ii = compare_traces(dvm, dvm_bt);
+	if (ii < 0)
+		return; /* this is a repeat stack trace, don't print anything */
+	else if (ii > 1)
+		__log_print(tv, logf, "DVM", "BT_REPEAT:%d:", ii);
 
 	__log_print(tv, logf, "DVM", "BT_START:");
 	for (ii = 0; ii < dvm_bt->count; ii++) {
