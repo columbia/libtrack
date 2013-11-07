@@ -301,7 +301,7 @@ void print_dvm_bt(struct dvm_iface *dvm, FILE *logf,
 	__log_print(tv, logf, "DVM", "BT_START:");
 	for (ii = 0; ii < dvm_bt->count; ii++) {
 		m = dvm_bt->mlist[ii];
-		name = dvm->dvmHumanReadableMethod(m, true);
+		name = dvm->dvmHumanReadableMethod(m, DVM_BT_GET_SIGNATURE);
 		libc.fprintf(logf, " :%d:%s:\n", ii, name.c_str());
 	}
 	__log_print(tv, logf, "DVM", "BT_END");

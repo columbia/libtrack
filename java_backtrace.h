@@ -13,6 +13,10 @@ __BEGIN_DECLS
 #include <stdint.h>
 #include "backtrace.h"
 
+#ifndef DVM_BT_GET_SIGNATURE
+#define DVM_BT_GET_SIGNATURE false
+#endif
+
 #define DVM_DFLT_DSO_PATH "/system/lib/libdvm.so"
 
 #if defined(HAVE_ENDIAN_H)
