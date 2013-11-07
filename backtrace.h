@@ -11,16 +11,7 @@
 #include "wrap_lib.h"
 
 #define MAX_BT_FRAMES 128
-
-/*
-struct bt_info {
-	void *addr;
-	const char *symbol;
-	void *symaddr;
-	const char *libname;
-	void *libstart;
-};
-*/
+#define MAX_LINE_LEN  256
 
 struct bt_frame {
 	//struct bt_info pc;
@@ -41,5 +32,36 @@ struct bt_state {
 	struct dvm_bt *dvm_bt;
 	FILE *f;
 };
+
+struct bt_line {
+	void     *sym;
+	uint32_t  usage;
+	char      str[MAX_LINE_LEN];
+};
+
+#define BT_CACHE_BITS 10
+#define BT_CACHE_SZ   (1 << BT_CACHE_BITS)
+#define BT_CACHE_MSK  (BT_CACHE_SZ - 1)
+
+static inline uint16_t bt_hash(void *sym)
+{
+	uint16_t a, b;
+	a = (uint32_t)(sym) & 0xFFFF;
+	b = ((uint32_t)(sym) >> 16) & 0xFFFF;
+	return ((a >> 2) + (b & 0x3FF) + ((b >> 10) & 0x3F)) & BT_CACHE_MSK;
+}
+
+/*
+ * With a 256 byte line, this is approximately 528k per thread
+ */
+struct bt_line_cache {
+	int usage;
+	int hit;
+	int miss;
+	struct bt_line c[BT_CACHE_SZ][2];
+};
+
+
+struct bt_line *bt_cache_fetch(void *sym, struct bt_line_cache **cache_out);
 
 #endif /* WRAPPER_BACKTRACE_H */

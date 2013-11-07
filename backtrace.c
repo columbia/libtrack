@@ -21,17 +21,105 @@ extern struct dvm_iface  dvm;
 static struct dvm_iface  dvm;
 #endif
 
+/*
+ * TODO: add some locking, and make the cache global!
+ */
+static pthread_key_t s_line_cache_key = (pthread_key_t)(-1);
+
+static struct bt_line_cache *get_bt_line_cache(void)
+{
+	struct bt_line_cache *cache;
+
+	if (s_line_cache_key == (pthread_key_t)(-1))
+		if (libc.pthread_key_create(&s_line_cache_key, NULL) != 0)
+			return NULL;
+
+	cache = (struct bt_line_cache *)libc.pthread_getspecific(s_line_cache_key);
+	if (cache)
+		return cache;
+
+	cache = (struct bt_line_cache *)libc.malloc(sizeof(*cache));
+	if (!cache)
+		return NULL;
+	libc.memset(cache, 0, sizeof(*cache));
+	libc.pthread_setspecific(s_line_cache_key, cache);
+	return cache;
+}
+
+struct bt_line *bt_cache_fetch(void *sym, struct bt_line_cache **cache_out)
+{
+	struct bt_line_cache *cache;
+	struct bt_line *l;
+	uint16_t idx;
+
+	cache = get_bt_line_cache();
+	if (!cache)
+		return NULL;
+
+	idx = bt_hash(sym);
+	if (cache_out)
+		*cache_out = cache;
+
+	l = cache->c[idx];
+	if (l[0].sym == sym) {
+		cache->hit++;
+		l[0].usage++;
+		return &l[0];
+	}
+	if (l[1].sym == sym) {
+		cache->hit++;
+		l[1].usage++;
+		return &l[1];
+	}
+
+	cache->miss++;
+	if (!l[0].sym) {
+		cache->usage++;
+		return &l[0];
+	}
+	if (!l[1].sym) {
+		cache->usage++;
+		return &l[1];
+	}
+
+	/* both levels of cache are full - evict the least recently used */
+	if (l[0].usage < l[1].usage) {
+		l[0].usage++;
+		return &l[0];
+	}
+	l[1].usage++;
+	return &l[1];
+}
+
 #define FRAMES_TO_SKIP 2
 
 static inline void print_info(FILE *f, int count, void *sym)
 {
 	unsigned long ofst;
 	char c;
-	Dl_info dli = { .dli_saddr = 0, .dli_fname = 0, .dli_fbase = 0 };
+	struct bt_line_cache *cache = NULL;
+	struct bt_line *cline;
+	Dl_info dli;
 
-	/*
-	 * TODO: cache symbol info somewhere!
-	 */
+	cline = bt_cache_fetch(sym, &cache);
+	if (!cline)
+		goto do_lookup;
+
+#ifdef OUTPUT_CACHE_STATS
+	if (cache &&
+	    ((cache->hit + cache->miss) % 1024 == 0))
+		libc.fprintf(f, " :CACHE_STATS:U[%d]:H[%d]:M[%d]\n",
+			     cache->usage, cache->hit, cache->miss);
+#endif
+
+	if (cline->sym == sym) { /* cache hit! */
+		libc.fprintf(f, " :%d%s", count, cline->str);
+		return;
+	}
+
+	cline->sym = sym;
+
+do_lookup:
 	if (dladdr(sym, &dli) == 0)
 		libc.memset(&dli, 0, sizeof(dli));
 
@@ -48,6 +136,16 @@ static inline void print_info(FILE *f, int count, void *sym)
 		c = '-';
 		ofst = (unsigned long)dli.dli_saddr -
 			(unsigned long)sym;
+	}
+
+	if (cline) {
+		libc.snprintf(cline->str, MAX_LINE_LEN,
+			      ":%x:%s:%c0x%x:%s(%p):\n",
+			      (unsigned int)sym,
+			      dli.dli_sname ? dli.dli_sname : "??",
+			      c, ofst, dli.dli_fname, dli.dli_fbase);
+		libc.fprintf(f, " :%d%s", count, cline->str);
+		return;
 	}
 
 	libc.fprintf(f, " :%d:0x%x:%s:%c0x%x:%s(%p):\n",

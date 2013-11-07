@@ -283,14 +283,40 @@ save_current_stack:
 	return ret;
 }
 
+static void print_dvm_sym(FILE *f, struct dvm_iface *dvm,
+			  int count, struct Method *m)
+{
+	struct bt_line_cache *cache = NULL;
+	struct bt_line *cline;
+
+	cline = bt_cache_fetch((void *)m, &cache);
+	if (!cline)
+		goto do_lookup;
+
+	if (cline->sym == (void *)m) {
+		libc.fprintf(f, " :%d%s", count, cline->str);
+		return;
+	}
+
+	cline->sym = (void *)m;
+
+do_lookup:
+	std::string name;
+	name = dvm->dvmHumanReadableMethod(m, DVM_BT_GET_SIGNATURE);
+	if (cline) {
+		libc.snprintf(cline->str, MAX_LINE_LEN, ":%s:\n", name.c_str());
+		libc.fprintf(f, " :%d%s", count, cline->str);
+		return;
+	}
+
+	libc.fprintf(f, " :%d:%s:\n", count, name.c_str());
+}
 
 extern "C"
 void print_dvm_bt(struct dvm_iface *dvm, FILE *logf,
 		  struct dvm_bt *dvm_bt, struct timeval *tv)
 {
 	int ii;
-	struct Method *m;
-	std::string name;
 
 	ii = compare_traces(dvm, dvm_bt);
 	if (ii < 0)
@@ -300,9 +326,7 @@ void print_dvm_bt(struct dvm_iface *dvm, FILE *logf,
 
 	__log_print(tv, logf, "DVM", "BT_START:%d:", dvm_bt->count);
 	for (ii = 0; ii < dvm_bt->count; ii++) {
-		m = dvm_bt->mlist[ii];
-		name = dvm->dvmHumanReadableMethod(m, DVM_BT_GET_SIGNATURE);
-		libc.fprintf(logf, " :%d:%s:\n", ii, name.c_str());
+		print_dvm_sym(logf, dvm, ii, dvm_bt->mlist[ii]);
 	}
 
 	/* __log_print(tv, logf, "DVM", "BT_END"); */
