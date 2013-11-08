@@ -127,7 +127,7 @@ extern FILE *get_log(int release);
 
 extern volatile int*  __errno(void);
 
-#define LOG_BUFFER_SIZE (64 * 1024)
+#define LOG_BUFFER_SIZE (66 * 1024)
 
 struct log_info {
 	const char *symbol;

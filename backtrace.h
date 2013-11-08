@@ -13,7 +13,7 @@
 
 __BEGIN_DECLS
 
-#define MAX_BT_FRAMES 96
+#define MAX_BT_FRAMES 128
 #define MAX_LINE_LEN  256
 
 struct bt_frame {
@@ -45,7 +45,7 @@ struct bt_line {
 	char      str[MAX_LINE_LEN];
 };
 
-#define BT_CACHE_BITS 10
+#define BT_CACHE_BITS 9
 #define BT_CACHE_SZ   (1 << BT_CACHE_BITS)
 #define BT_CACHE_MSK  (BT_CACHE_SZ - 1)
 
@@ -54,7 +54,10 @@ static inline uint16_t bt_hash(void *sym)
 	uint16_t a, b;
 	a = (uint32_t)(sym) & 0xFFFF;
 	b = ((uint32_t)(sym) >> 16) & 0xFFFF;
-	return ((a >> 2) + (b & 0x3FF) + ((b >> 10) & 0x3F)) & BT_CACHE_MSK;
+	return (  (a & BT_CACHE_MSK)
+		+ ((a >> BT_CACHE_BITS) & BT_CACHE_MSK)
+		+ (b & BT_CACHE_MSK)
+		+ ((b >> BT_CACHE_BITS) & BT_CACHE_MSK)) & BT_CACHE_MSK;
 }
 
 /*

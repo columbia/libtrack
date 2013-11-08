@@ -13,6 +13,8 @@
 #include "backtrace.h"
 #include "java_backtrace.h"
 
+//#define OUTPUT_CACHE_STATS
+
 /*
  * Unwound stack frame:
  *	<TRACE_FUNC (isn't counted)>
