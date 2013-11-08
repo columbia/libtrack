@@ -12,6 +12,8 @@
 #include <unwind.h>
 #include <sys/cdefs.h>
 
+#include "libz.h"
+
 #define ___str(x) #x
 #define __str(x) ___str(x)
 #define _str(x) __str(x)
@@ -127,7 +129,7 @@ extern int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack
 
 extern void setup_tls_stack(int align, void *regs, int slots);
 
-extern FILE *get_log(int release);
+extern void *get_log(int release);
 
 extern volatile int*  __errno(void);
 
@@ -167,15 +169,27 @@ do { \
 
 #define bt_flush(info, logf) \
 	if (*((info)->log_pos) > 0) { \
-		libc.fwrite((info)->log_buffer, *((info)->log_pos), 1, logf); \
+		if (zlib.valid) \
+			zlib.gzwrite((struct gzFile *)(logf), \
+				     (info)->log_buffer, *(info)->log_pos); \
+		else \
+			libc.fwrite((info)->log_buffer, \
+				    *((info)->log_pos), 1, (FILE *)(logf)); \
 		*(info)->log_pos = 0; \
 	}
 
 
 #define __log_print_raw(tvptr, f, fmt, ...) \
-	libc.fprintf(f, "%lu.%lu:" fmt, \
-		     (unsigned long)(tvptr)->tv_sec, \
-		     (unsigned long)(tvptr)->tv_usec, ## __VA_ARGS__ )
+	do { \
+	if (zlib.valid) \
+		zlib.gzprintf((struct gzFile *)(f), "%lu.%lu:" fmt, \
+			     (unsigned long)(tvptr)->tv_sec, \
+			     (unsigned long)(tvptr)->tv_usec, ## __VA_ARGS__ ); \
+	else \
+		libc.fprintf((FILE *)(f), "%lu.%lu:" fmt, \
+			     (unsigned long)(tvptr)->tv_sec, \
+			     (unsigned long)(tvptr)->tv_usec, ## __VA_ARGS__ ); \
+	} while (0)
 
 #define __log_print(tvptr, f, key, fmt, ...) \
 	__log_print_raw(tvptr, f, key ":" fmt "\n", ## __VA_ARGS__ )
@@ -189,10 +203,18 @@ do { \
 
 #define libc_log(fmt, ...) \
 	do { \
-		FILE *f; \
+		void *f; \
 		f = get_log(0); \
 		if (f) \
 			log_print(f, LOG, fmt, ## __VA_ARGS__ ); \
+	} while (0)
+
+#define log_flush(f) \
+	do { \
+	if (zlib.valid) \
+		zlib.gzflush((struct gzFile *)(f), Z_SYNC_FLUSH); \
+	else \
+		libc.fflush((FILE *)f); \
 	} while (0)
 
 #define lnk_dbg(msg) \
@@ -203,12 +225,17 @@ do { \
 
 static inline void libc_close_log(void)
 {
-	FILE *f;
+	void *f;
 	f = get_log(1);
 	if (f) {
 		log_print(f, LOG, "END");
-		libc.fflush(f);
-		libc.fclose(f);
+		if (zlib.valid) {
+			zlib.gzflush((struct gzFile *)f, Z_FINISH);
+			zlib.gzclose_w((struct gzFile *)f);
+		} else {
+			libc.fflush((FILE *)f);
+			libc.fclose((FILE *)f);
+		}
 	}
 }
 
@@ -237,25 +264,31 @@ static inline int should_log(void)
 
 #define BUG(X) \
 	do { \
-		FILE *f; \
+		void *f; \
 		f = get_log(1); \
 		if (f) { \
 			log_print(f, _BUG_, "(0x%x) at %s:%d", X, __FILE__, __LINE__); \
-			libc.fflush(f); \
-			libc.fclose(f); \
+			log_flush(f); \
+			if (zlib.valid) \
+				zlib.gzclose_w((struct gzFile *)f); \
+			else \
+				libc.fclose((FILE *)(f)); \
 		} \
 		_BUG(X); \
 	} while (0)
 
 #define BUG_MSG(X,fmt,...) \
 	do { \
-		FILE *f; \
+		void *f; \
 		f = get_log(1); \
 		if (f) { \
 			log_print(f, _BUG_, "(0x%x) at %s:%d", X, __FILE__, __LINE__); \
 			log_print(f, _BUG_, fmt, ## __VA_ARGS__ ); \
-			libc.fflush(f); \
-			libc.fclose(f); \
+			log_flush(f); \
+			if (zlib.valid) \
+				zlib.gzclose_w((struct gzFile *)f); \
+			else \
+				libc.fclose((FILE *)(f)); \
 		} \
 		_BUG(X); \
 	} while (0)

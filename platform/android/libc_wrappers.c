@@ -106,13 +106,18 @@ wrap_special(struct log_info *info)
 
 static void flush_and_close(const char *msg, struct log_info *info)
 {
-	FILE *f;
+	void *f;
 
 	f = get_log(1);
 	log_print(f, LOG, "I:%s %s(0x%x,0x%x,0x%x,0x%x)", msg, info->symbol,
 		     info->regs[0], info->regs[1], info->regs[2], info->regs[3]);
-	libc.fflush(f);
-	libc.fclose(f);
+	if (zlib.valid) {
+		zlib.gzflush((struct gzFile *)f, Z_FINISH);
+		zlib.gzclose_w((struct gzFile *)f);
+	} else {
+		libc.fflush((FILE *)f);
+		libc.fclose((FILE *)f);
+	}
 }
 
 int handle_exit(struct log_info *info)

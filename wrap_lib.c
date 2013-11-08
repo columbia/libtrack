@@ -15,7 +15,7 @@
 const char *progname = NULL;
 
 /* from backtrace.c */
-extern void log_backtrace(FILE *logf, struct log_info *info);
+extern void log_backtrace(void *logf, struct log_info *info);
 
 /* lib-specific wrapping handlers (e.g. [v]fork in libc) */
 #ifdef HAVE_WRAP_SPECIAL
@@ -128,9 +128,52 @@ static void *table_dlsym(void *dso, const char *sym, int allow_null)
 
 static pthread_key_t log_key = (pthread_key_t)(-1);
 
-FILE __attribute__((visibility("hidden"))) *get_log(int release)
+static inline FILE *__open_stdlogfile()
 {
-	FILE *logf = NULL;
+	FILE *logf;
+	char buf[256];
+	const char *nm = local_strrchr(progname, '/');
+	libc.snprintf(buf, sizeof(buf), "%s/%d.%d.%s.%s.log",
+		      LOGFILE_PATH, libc.getpid(),
+		      libc.gettid(), _str(_IBNAM_),
+		      nm ? nm+1 : progname);
+	logf = libc.fopen(buf, "a");
+	if (!logf)
+		return NULL;
+	libc.fchmod(libc.fno(logf), 0666);
+	log_print(logf, LOG, "BEGIN");
+	libc.fflush(logf);
+	return logf;
+}
+
+static inline struct gzFile *__open_gzlogfile(void)
+{
+	FILE *logf;
+	struct gzFile *gzlogf;
+	char buf[256];
+	const char *nm = local_strrchr(progname, '/');
+	libc.snprintf(buf, sizeof(buf), "%s/%d.%d.%s.%s.log.gz",
+		      LOGFILE_PATH, libc.getpid(),
+		      libc.gettid(), _str(_IBNAM_),
+		      nm ? nm+1 : progname);
+	logf = libc.fopen(buf, "a");
+	if (!logf)
+		return NULL;
+	libc.fchmod(libc.fno(logf), 0666);
+	gzlogf = zlib.gzdopen(libc.fno(logf), "ab");
+	if (!gzlogf) {
+		libc.fclose(logf);
+		return NULL;
+	}
+	zlib.gzsetparams(gzlogf, Z_BEST_COMPRESSION, Z_DEFAULT_STRATEGY);
+	log_print(gzlogf, LOG, "BEGIN");
+	zlib.gzflush(gzlogf, Z_FULL_FLUSH);
+	return gzlogf;
+}
+
+void __attribute__((visibility("hidden"))) *get_log(int release)
+{
+	void *f;
 
 	if (!libc.dso) {
 		if (init_libc_iface(&libc, LIBC_PATH) < 0)
@@ -140,31 +183,30 @@ FILE __attribute__((visibility("hidden"))) *get_log(int release)
 			setup_tls_stack(1, NULL, 0);
 		 */
 	}
+	if (!zlib.dso)
+		init_zlib_iface(&zlib, ZLIB_DFLT_PATH);
 
 	if (log_key == (pthread_key_t)(-1)) {
 		libc.pthread_key_create(&log_key, NULL);
 		libc.pthread_setspecific(log_key, NULL);
 	}
 
-	logf = (FILE *)libc.pthread_getspecific(log_key);
-	if (!logf) {
-		char buf[256];
-		const char *nm = local_strrchr(progname, '/');
-		libc.snprintf(buf, sizeof(buf), "%s/%d.%d.%s.%s.log",
-			      LOGFILE_PATH, libc.getpid(),
-			      libc.gettid(), _str(_IBNAM_),
-			      nm ? nm+1 : progname);
-		logf = libc.fopen(buf, "a+");
-		if (!logf)
-			return NULL;
-		libc.fchmod(libc.fno(logf), 0666);
-		log_print(logf, LOG, "BEGIN");
-		libc.fflush(logf);
-		libc.pthread_setspecific(log_key, logf);
+	f = libc.pthread_getspecific(log_key);
+	if (!f) {
+		if (zlib.valid) {
+			f = (void *)__open_gzlogfile();
+			if (!f) {
+				zlib.valid = 0;
+				f = (void *)__open_stdlogfile();
+				log_print(f, LOG, "E:Failed to open libz!");
+			}
+		} else
+			f = (void *)__open_stdlogfile();
+		libc.pthread_setspecific(log_key, f);
 	}
 	if (release)
 		libc.pthread_setspecific(log_key, NULL);
-	return logf;
+	return f;
 }
 
 /**
@@ -209,7 +251,7 @@ static pthread_key_t s_tracing_key = (pthread_key_t)(-1);
 int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack)
 {
 	int ret = 0;
-	FILE *logf;
+	void *logf;
 	struct log_info li;
 
 	if (!libc.dso) {
@@ -239,7 +281,7 @@ int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack)
 			goto out;
 		if (!regs && !stack) {
 			log_print(logf, CALL, "%s", symbol);
-			libc.fflush(logf);
+			log_flush(logf);
 			goto out;
 		}
 

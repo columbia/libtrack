@@ -206,7 +206,7 @@ static void print_bt_state(struct bt_state *state, struct log_info *info)
 }
 
 static void __attribute__((noinline))
-std_backtrace(FILE *logf, struct log_info *info)
+std_backtrace(void *logf, struct log_info *info)
 {
 	struct bt_state state;
 	void *frames[MAX_BT_FRAMES];
@@ -308,7 +308,7 @@ static inline int is_same_stack(struct bt_frame *current, void **last, int count
 
 
 static void __attribute__((noinline))
-unwind_backtrace(FILE *logf, struct log_info *info)
+unwind_backtrace(void *logf, struct log_info *info)
 {
 	Dl_info dli;
 	int i;
@@ -363,7 +363,7 @@ unwind_backtrace(FILE *logf, struct log_info *info)
 static pthread_key_t s_log_buffer_key = (pthread_key_t)-1;
 
 void __attribute__((visibility("hidden"))) __attribute__((noinline))
-log_backtrace(FILE *logf, struct log_info *info)
+log_backtrace(void *logf, struct log_info *info)
 {
 	char *buf = NULL;
 

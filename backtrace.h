@@ -33,7 +33,7 @@ struct bt_state {
 	int count;
 	int nskip;
 	struct dvm_bt *dvm_bt;
-	FILE *f;
+	void *f;
 };
 
 extern void bt_free_log_buffer(void);

@@ -343,6 +343,7 @@ __EOF
 		$(basename "$asm") \\
 		wrap_lib.c \\
 		backtrace.c \\
+		libz.c \\
 		java_backtrace.cpp \\
 		platform/${ARCH}/\$(TARGET_ARCH)/crtend_so.S
 __EOF
@@ -481,6 +482,8 @@ __EOF
 	ln -s "${CDIR}/backtrace.h" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/java_backtrace.h" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/java_backtrace.cpp" "${dir}" 2>/dev/null
+	ln -s "${CDIR}/libz.h" "${dir}" 2>/dev/null
+	ln -s "${CDIR}/libz.c" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/wrap_lib.c" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/wrap_lib.h" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/arch" "${dir}" 2>/dev/null
