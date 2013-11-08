@@ -73,8 +73,12 @@ wrap_special(struct log_info *info)
 			f = handle_fork;
 		break;
 	case 'p':
-		if (sc == 't' && local_strcmp("hread_create", info->symbol+2) == 0)
-			f = handle_pthread;
+		if (sc == 't') {
+			if (local_strcmp("hread_create", info->symbol+2) == 0)
+				f = handle_pthread;
+			else if (local_strcmp("hread_exit", info->symbol+2) == 0)
+				f = handle_exit;
+		}
 		break;
 	case 'b':
 		if (sc == 's' && local_strcmp("d_signal", info->symbol+2) == 0)
@@ -238,6 +242,8 @@ int handle_exec(struct log_info *info)
 
 int handle_pthread(struct log_info *info)
 {
+	if (should_log())
+		flush_and_close("PTHREAD", info);
 	bt_free_log_buffer();
 	return 0;
 }
