@@ -29,6 +29,7 @@
  */
 #define DVM_CALL_METHOD   "_Z13dvmCallMethodP6ThreadPK6MethodP6ObjectP6JValuez"
 #define DVM_CALL_METHOD_A "_Z14dvmCallMethodAP6ThreadPK6MethodP6ObjectbP6JValuePK6jvalue"
+#define DVM_CALL_METHOD_V "_Z14dvmCallMethodVP6ThreadPK6MethodP6ObjectbP6JValueSt9__va_list"
 
 /*
  *
@@ -79,6 +80,8 @@ static void *_find_symbol_end(void *sym_start)
 extern "C"
 void init_dvm_iface(struct dvm_iface *dvm, const char *dso_path)
 {
+	int ii;
+
 	if (dvm->dso)
 		return;
 
@@ -114,28 +117,34 @@ void init_dvm_iface(struct dvm_iface *dvm, const char *dso_path)
 #undef __init_sym
 
 	/*
-	 * Now find the two functions that indicate
+	 * Now find the functions that indicate
 	 * we are within the Java call stack
 	 */
-	dvm->dvmCallMethodSym[0] = dlsym(dvm->dso, DVM_CALL_METHOD);
-	dvm->dvmCallMethodASym[0] = dlsym(dvm->dso, DVM_CALL_METHOD_A);
+	dvm->dvmCallMethodSym[0][0] = dlsym(dvm->dso, DVM_CALL_METHOD);
+	dvm->dvmCallMethodSym[1][0] = dlsym(dvm->dso, DVM_CALL_METHOD_A);
+	dvm->dvmCallMethodSym[2][0] = dlsym(dvm->dso, DVM_CALL_METHOD_V);
 
 	/*
 	 * note: if either of these fail, then we won't ever find a
 	 * java/dalvik backtrace, but we won't risk instability either
 	 */
-	if (!dvm->dvmCallMethodSym[0] || !dvm->dvmCallMethodASym[0])
-		libc_log("W:Couldn't find dvmCallMethod[A] in libdvm.so");
+	for (ii = 0; ii < (int)ARRAY_SZ(dvm->dvmCallMethodSym); ii++) {
+		if (!dvm->dvmCallMethodSym[ii][0]) {
+			libc_log("W:Couldn't find dvmCallMethod[A] in libdvm.so");
+		} else {
+			void *end;
+			end = _find_symbol_end(dvm->dvmCallMethodSym[ii][0]);
+			dvm->dvmCallMethodSym[ii][1] = end;
+			libc_log("I:dvmCallMethod[%d][%p-%p]:", ii,
+				 dvm->dvmCallMethodSym[ii][0],
+				 dvm->dvmCallMethodSym[ii][1]);
+		}
+	}
 
-	dvm->dvmCallMethodSym[1] = _find_symbol_end(dvm->dvmCallMethodSym[0]);
-	dvm->dvmCallMethodASym[1] = _find_symbol_end(dvm->dvmCallMethodASym[0]);
-
-	libc_log("I:dvmCallMethod[%p-%p]:dvmCallMethodA[%p-%p]:",
-		 dvm->dvmCallMethodSym[0], dvm->dvmCallMethodSym[1],
-		 dvm->dvmCallMethodASym[0], dvm->dvmCallMethodASym[1]);
-
-	if (s_dvm_thread_name_key == (pthread_key_t)(-1))
+	if (s_dvm_thread_name_key == (pthread_key_t)(-1)) {
 		libc.pthread_key_create(&s_dvm_thread_name_key, NULL);
+		libc.pthread_setspecific(s_dvm_thread_name_key, NULL);
+	}
 	return;
 }
 
@@ -176,20 +185,20 @@ void get_dvm_backtrace(struct dvm_iface *dvm,
 	 */
 	cnt = bt_state->count;
 	while (--cnt >= 0) {
+		int ii;
 		void *addr = bt_state->frame[cnt].pc;
-		if (_in_range(addr, dvm->dvmCallMethodSym) ||
-		    _in_range(addr, dvm->dvmCallMethodASym))
-			break;
+		for (ii = 0; ii < (int)ARRAY_SZ(dvm->dvmCallMethodSym); ii++)
+			if (_in_range(addr, dvm->dvmCallMethodSym[ii]))
+				goto do_dvm_bt;
 	}
-	if (cnt < 0) {
-		dvm_bt->count = 0;
-		return;
-	}
+	dvm_bt->count = 0;
+	return;
 
 	/*
 	 * We have a call stack that's from a Java/Dalvik thread:
 	 * get the backtrace!
 	 */
+do_dvm_bt:
 	{
 		struct Thread *self;
 		uint32_t *fp = NULL;
@@ -327,7 +336,7 @@ void print_dvm_bt(struct dvm_iface *dvm, struct dvm_bt *dvm_bt,
 		__bt_printf(info, "DVM:BT_REPEAT:%d:\n", ii);
 	*/
 
-	bt_printf(info, "DVM:BT_START:%d:", dvm_bt->count);
+	bt_printf(info, "DVM:BT_START:%d:\n", dvm_bt->count);
 	for (ii = 0; ii < dvm_bt->count; ii++) {
 		print_dvm_sym(info, dvm, ii, dvm_bt->mlist[ii]);
 	}

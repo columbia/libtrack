@@ -120,8 +120,7 @@ struct dvm_bt {
 struct dvm_iface {
 	void *dso;
 
-	void *dvmCallMethodSym[2];
-	void *dvmCallMethodASym[2];
+	void *dvmCallMethodSym[3][2];
 
 	struct Thread *(*dvmThreadSelf)(void);
 

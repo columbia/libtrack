@@ -16,6 +16,9 @@
 #define __str(x) ___str(x)
 #define _str(x) __str(x)
 
+#define ARRAY_SZ(arr) \
+	(sizeof(arr) / sizeof((arr)[0]))
+
 #define EN_LOG_FILE "enable_trace_logs"
 
 #if defined(ANDROID)
