@@ -68,6 +68,7 @@ struct libc_iface {
 	FILE *(*fopen)(const char *pathname, const char *mode);
 	int (*fclose)(FILE *f);
 	ssize_t (*fwrite)(const void *buf, size_t size, size_t nitems, FILE *f);
+	ssize_t (*fread)(void *buf, size_t size, size_t nitems, FILE *f);
 	int (*fflush)(FILE *f);
 	int (*fno)(FILE *f);
 	int (*fchmod)(int fd, mode_t mode);

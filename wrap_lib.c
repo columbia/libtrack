@@ -297,6 +297,7 @@ int init_libc_iface(struct libc_iface *iface, const char *dso_path)
 	init_sym(iface, 1, fopen,);
 	init_sym(iface, 1, fclose,);
 	init_sym(iface, 1, fwrite,);
+	init_sym(iface, 1, fread,);
 	init_sym(iface, 1, fflush,);
 	init_sym(iface, 1, fno, fileno);
 	init_sym(iface, 1, fchmod,);
