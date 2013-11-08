@@ -13,6 +13,16 @@
 #include "backtrace.h"
 #include "java_backtrace.h"
 
+/*
+ * Unwound stack frame:
+ *	<TRACE_FUNC (isn't counted)>
+ *	unwind_backtrace
+ *	log_backtrace
+ *	wrapped_tracer
+ * skip them all
+ */
+#define FRAMES_TO_SKIP 3
+
 extern struct libc_iface libc;
 
 #ifdef ANDROID
@@ -90,8 +100,6 @@ struct bt_line *bt_cache_fetch(void *sym, struct bt_line_cache **cache_out)
 	l[1].usage++;
 	return &l[1];
 }
-
-#define FRAMES_TO_SKIP 2
 
 static inline void print_info(FILE *f, int count, void *sym)
 {
@@ -180,7 +188,8 @@ static void print_bt_state(struct bt_state *state, struct timeval *tv)
 	/* log_print(state->f, BT, "END"); */
 }
 
-static void std_backtrace(FILE *logf, struct log_info *info)
+static void __attribute__((noinline))
+std_backtrace(FILE *logf, struct log_info *info)
 {
 	struct bt_state state;
 	void *frames[MAX_BT_FRAMES];
@@ -225,12 +234,6 @@ static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 
 	ip = __Unwind_GetIP(context);
 
-	/* The first stack frame is:
-	 *	log_backtrace
-	 * and the second is:
-	 *	wrapped_tracer
-	 * skip them both
-	 */
 	if (ip != 0 && state->nskip < FRAMES_TO_SKIP) {
 		state->nskip++;
 		return _URC_NO_REASON;
@@ -287,7 +290,8 @@ static inline int is_same_stack(struct bt_frame *current, void **last, int count
 }
 
 
-static void unwind_backtrace(FILE *logf, struct log_info *info)
+static void __attribute__((noinline))
+unwind_backtrace(FILE *logf, struct log_info *info)
 {
 	Dl_info dli;
 	int i;
@@ -341,7 +345,7 @@ static void unwind_backtrace(FILE *logf, struct log_info *info)
 
 pthread_key_t s_last_stack_key = (pthread_key_t)-1;
 
-void __attribute__((visibility("hidden")))
+void __attribute__((visibility("hidden"))) __attribute__((noinline))
 log_backtrace(FILE *logf, struct log_info *info)
 {
 	char *last_stack = NULL;
