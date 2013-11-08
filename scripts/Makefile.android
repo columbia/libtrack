@@ -93,7 +93,7 @@ else
 install: LIBNAME := $(shell cd ../; basename $$(pwd))
 endif
 install:
-	@OK=0; if [ ! -z "$(CELLNAME)" ]; then \
+	@OK=1; if [ ! -z "$(CELLNAME)" ]; then \
 		echo "Mounting cell: '$(CELLNAME)'..."; \
 		adb shell "cell stop $(CELLNAME)" >/dev/null; \
 		sleep 3; \
