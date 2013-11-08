@@ -119,6 +119,7 @@ struct dvm_bt {
 
 struct dvm_iface {
 	void *dso;
+	int valid;
 
 	void *dvmCallMethodSym[3][2];
 

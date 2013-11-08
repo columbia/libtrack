@@ -99,6 +99,9 @@ void init_dvm_iface(struct dvm_iface *dvm, const char *dso_path)
 		(iface)->mem = dlsym((iface)->dso, #sym); \
 		if ((iface)->mem) \
 			break; \
+		(iface)->mem = dlsym((iface)->dso, "_" #sym); \
+		if ((iface)->mem) \
+			break; \
 		BUG(0xD0); \
 	} while (0)
 #define _init_sym(iface,sym,mem) \
@@ -145,6 +148,8 @@ void init_dvm_iface(struct dvm_iface *dvm, const char *dso_path)
 		libc.pthread_key_create(&s_dvm_thread_name_key, NULL);
 		libc.pthread_setspecific(s_dvm_thread_name_key, NULL);
 	}
+
+	dvm->valid = 1;
 	return;
 }
 
@@ -174,7 +179,7 @@ void get_dvm_backtrace(struct dvm_iface *dvm,
 {
 	int cnt;
 
-	if (!dvm->dso)
+	if (!dvm->valid)
 		return;
 
 	/*
@@ -206,8 +211,8 @@ do_dvm_bt:
 		int r;
 
 		self = dvm->dvmThreadSelf();
-		if (self)
-			fp = self->interpSave.curFrame;
+		if (!self)
+			return;
 
 		tname = (char *)libc.pthread_getspecific(s_dvm_thread_name_key);
 		if (!tname) {
@@ -297,6 +302,9 @@ static void print_dvm_sym(struct log_info *info, struct dvm_iface *dvm,
 {
 	struct bt_line_cache *cache = NULL;
 	struct bt_line *cline;
+
+	if (!dvm->valid)
+		return;
 
 	cline = bt_cache_fetch((void *)m, &cache);
 	if (!cline)
