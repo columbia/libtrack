@@ -127,6 +127,8 @@ extern FILE *get_log(int release);
 
 extern volatile int*  __errno(void);
 
+#define LOG_BUFFER_SIZE (64 * 1024)
+
 struct log_info {
 	const char *symbol;
 	uint32_t *regs;
@@ -137,7 +139,34 @@ struct log_info {
 	void **last_stack;
 	int   *last_stack_depth;
 	int   *last_stack_cnt;
+
+	char  *log_buffer;
+	int   *log_pos;
 };
+
+#define __bt_printf(info, fmt, ...) \
+do { \
+	if ((info)->log_buffer && (*(info)->log_pos < LOG_BUFFER_SIZE)) { \
+		int __len = libc.snprintf((info)->log_buffer + *(info)->log_pos, \
+					  LOG_BUFFER_SIZE - *(info)->log_pos, \
+					  fmt, ## __VA_ARGS__ ); \
+		*(info)->log_pos += __len; \
+	} else { \
+		libc_log("E:Buffer overrun!"); \
+	} \
+} while (0)
+
+#define bt_printf(info, fmt, ...) \
+	__bt_printf(info, "%lu.%lu:" fmt, \
+		    (unsigned long)((info)->tv.tv_sec), \
+		    (unsigned long)((info)->tv.tv_usec), ## __VA_ARGS__ )
+
+#define bt_flush(info, logf) \
+	if (*((info)->log_pos) > 0) { \
+		libc.fwrite((info)->log_buffer, *((info)->log_pos), 1, logf); \
+		*(info)->log_pos = 0; \
+	}
+
 
 #define __log_print_raw(tvptr, f, fmt, ...) \
 	libc.fprintf(f, "%lu.%lu:" fmt, \

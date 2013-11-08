@@ -56,6 +56,21 @@ static struct bt_line_cache *get_bt_line_cache(void)
 	return cache;
 }
 
+void bt_flush_cache(void)
+{
+	void *cache;
+
+	if (s_line_cache_key == (pthread_key_t)(-1))
+		if (libc.pthread_key_create(&s_line_cache_key, NULL) != 0)
+			return;
+
+	cache = libc.pthread_getspecific(s_line_cache_key);
+	if (cache) {
+		libc.free(cache);
+		libc.pthread_setspecific(s_line_cache_key, NULL);
+	}
+}
+
 struct bt_line *bt_cache_fetch(void *sym, struct bt_line_cache **cache_out)
 {
 	struct bt_line_cache *cache;
@@ -101,7 +116,7 @@ struct bt_line *bt_cache_fetch(void *sym, struct bt_line_cache **cache_out)
 	return &l[1];
 }
 
-static inline void print_info(FILE *f, int count, void *sym)
+static inline void print_info(struct log_info *info, int count, void *sym)
 {
 	unsigned long ofst;
 	char c;
@@ -116,12 +131,12 @@ static inline void print_info(FILE *f, int count, void *sym)
 #ifdef OUTPUT_CACHE_STATS
 	if (cache &&
 	    ((cache->hit + cache->miss) % 1024 == 0))
-		libc.fprintf(f, " :CACHE_STATS:U[%d]:H[%d]:M[%d]\n",
-			     cache->usage, cache->hit, cache->miss);
+		__bt_printf(info, " :CACHE_STATS:U[%d]:H[%d]:M[%d]\n",
+			    cache->usage, cache->hit, cache->miss);
 #endif
 
 	if (cline->sym == sym) { /* cache hit! */
-		libc.fprintf(f, " :%d%s", count, cline->str);
+		__bt_printf(info, " :%d:%s", count, cline->str);
 		return;
 	}
 
@@ -148,21 +163,21 @@ do_lookup:
 
 	if (cline) {
 		libc.snprintf(cline->str, MAX_LINE_LEN,
-			      ":%x:%s:%c0x%x:%s(%p):\n",
+			      "%x:%s:%c0x%x:%s(%p):\n",
 			      (unsigned int)sym,
 			      dli.dli_sname ? dli.dli_sname : "??",
 			      c, ofst, dli.dli_fname, dli.dli_fbase);
-		libc.fprintf(f, " :%d%s", count, cline->str);
+		__bt_printf(info, " :%d:%s", count, cline->str);
 		return;
 	}
 
-	libc.fprintf(f, " :%d:0x%x:%s:%c0x%x:%s(%p):\n",
-		     count, (unsigned int)sym,
-		     dli.dli_sname ? dli.dli_sname : "??",
-		     c, ofst, dli.dli_fname, dli.dli_fbase);
+	__bt_printf(info, " :%d:0x%x:%s:%c0x%x:%s(%p):\n",
+		    count, (unsigned int)sym,
+		    dli.dli_sname ? dli.dli_sname : "??",
+		    c, ofst, dli.dli_fname, dli.dli_fbase);
 }
 
-static void print_bt_state(struct bt_state *state, struct timeval *tv)
+static void print_bt_state(struct bt_state *state, struct log_info *info)
 {
 	int count;
 	struct bt_frame *frame;
@@ -170,12 +185,12 @@ static void print_bt_state(struct bt_state *state, struct timeval *tv)
 	char c;
 	const char *sym;
 
-	__log_print(tv, state->f, "BT", "START:%d:", state->count);
+	bt_printf(info, "BT:START:%d:\n", state->count);
 	for (count = 0; count < state->count; count++) {
 		frame = &state->frame[count];
-		print_info(state->f, count, frame->pc);
+		print_info(info, count, frame->pc);
 #ifdef VERBOSE_FRAME_INFO
-		libc.fprintf(state->f, " : :R0=0x%08x,R1=0x%08x,R2=0x%08x,"
+		__br_printf(info, " : :R0=0x%08x,R1=0x%08x,R2=0x%08x,"
 			     "R3=0x%08x,SP=0x%08x,LR=0x%08x\n",
 			     frame->reg[0], frame->reg[1], frame->reg[2],
 			     frame->reg[3], frame->sp, frame->lr);
@@ -183,9 +198,9 @@ static void print_bt_state(struct bt_state *state, struct timeval *tv)
 	}
 
 	if (state->dvm_bt && state->dvm_bt->count > 0)
-		print_dvm_bt(&dvm, state->f, state->dvm_bt, tv);
+		print_dvm_bt(&dvm, state->dvm_bt, info);
 
-	/* log_print(state->f, BT, "END"); */
+	/* bt_printf(info, "BT:END:"); */
 }
 
 static void __attribute__((noinline))
@@ -203,7 +218,7 @@ std_backtrace(FILE *logf, struct log_info *info)
 	for (count = 0; count < state.count; count++)
 		state.frame[count].pc = frames[count];
 
-	print_bt_state(&state, &info->tv);
+	print_bt_state(&state, info);
 }
 
 #ifdef __arm__
@@ -330,8 +345,7 @@ unwind_backtrace(FILE *logf, struct log_info *info)
 	 *     reset the stats and keep the PCs for next time
 	 */
 	if (*(info->last_stack_cnt) > 1)
-		__log_print(&info->tv, state.f, "BT", "REPEAT:%d:",
-			    *(info->last_stack_cnt));
+		bt_printf(info, "BT:REPEAT:%d:\n", *(info->last_stack_cnt));
 
 	*(info->last_stack_cnt) = 1;
 	*(info->last_stack_depth) = state.count;
@@ -340,32 +354,37 @@ unwind_backtrace(FILE *logf, struct log_info *info)
 
 	get_dvm_backtrace(&dvm, &state, &dvm_bt);
 
-	print_bt_state(&state, &info->tv);
+	print_bt_state(&state, info);
 }
 
-pthread_key_t s_last_stack_key = (pthread_key_t)-1;
+
+static pthread_key_t s_log_buffer_key = (pthread_key_t)-1;
 
 void __attribute__((visibility("hidden"))) __attribute__((noinline))
 log_backtrace(FILE *logf, struct log_info *info)
 {
-	char *last_stack = NULL;
+	char *buf = NULL;
 
-	if (s_last_stack_key == -1)
-		if (libc.pthread_key_create(&s_last_stack_key, NULL) != 0)
+	if (s_log_buffer_key == -1)
+		if (libc.pthread_key_create(&s_log_buffer_key, NULL) != 0)
 			return;
 
-	last_stack = libc.pthread_getspecific(s_last_stack_key);
-	if (!last_stack) {
-		int sz = ((MAX_BT_FRAMES) * sizeof(void *)) + (2 * sizeof(int));
-		last_stack = (char *)libc.malloc(sz);
-		if (!last_stack)
+	buf = libc.pthread_getspecific(s_log_buffer_key);
+	if (!buf) {
+		int sz = LOG_BUFFER_SIZE
+				+ ((MAX_BT_FRAMES) * sizeof(void *))
+				+ (3 * sizeof(int));
+		buf = (char *)libc.malloc(sz);
+		if (!buf)
 			return;
-		libc.memset(last_stack, 0, sz);
-		libc.pthread_setspecific(s_last_stack_key, (void *)last_stack);
+		libc.memset(buf, 0, sz);
+		libc.pthread_setspecific(s_log_buffer_key, (void *)buf);
 	}
-	info->last_stack_depth = (int *)last_stack;
-	info->last_stack_cnt = (int *)(last_stack + sizeof(int));
-	info->last_stack = (void **)(last_stack + 2*sizeof(int));
+	info->log_buffer = buf;
+	info->log_pos = (int *)(buf + LOG_BUFFER_SIZE);
+	info->last_stack_depth = (int *)(buf + LOG_BUFFER_SIZE + sizeof(int));
+	info->last_stack_cnt = (int *)(buf + LOG_BUFFER_SIZE + 2*sizeof(int));
+	info->last_stack = (void **)(buf + LOG_BUFFER_SIZE + 3*sizeof(int));
 
 	/* initialize Dalvik VM backtracing */
 	if (!dvm.dso)
@@ -378,4 +397,22 @@ log_backtrace(FILE *logf, struct log_info *info)
 		unwind_backtrace(logf, info);
 	else
 		__log_print(&info->tv, logf, "CALL", "%s", info->symbol);
+
+	bt_flush(info, logf);
+}
+
+void bt_free_log_buffer(void)
+{
+	if (s_log_buffer_key != (pthread_key_t)-1) {
+		/*
+		 * both the parent, and the new thread will
+		 * re-create the necessary TLS keys/memory
+		 */
+		void *mem = libc.pthread_getspecific(s_log_buffer_key);
+		if (mem) {
+			libc.fflush(NULL);
+			libc.free(mem);
+			libc.pthread_setspecific(s_log_buffer_key, NULL);
+		}
+	}
 }

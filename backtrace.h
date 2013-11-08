@@ -9,8 +9,11 @@
 #define WRAPPER_BACKTRACE_H
 
 #include "wrap_lib.h"
+#include <sys/cdefs.h>
 
-#define MAX_BT_FRAMES 128
+__BEGIN_DECLS
+
+#define MAX_BT_FRAMES 96
 #define MAX_LINE_LEN  256
 
 struct bt_frame {
@@ -32,6 +35,9 @@ struct bt_state {
 	struct dvm_bt *dvm_bt;
 	FILE *f;
 };
+
+extern void bt_free_log_buffer(void);
+
 
 struct bt_line {
 	void     *sym;
@@ -62,6 +68,8 @@ struct bt_line_cache {
 };
 
 
-struct bt_line *bt_cache_fetch(void *sym, struct bt_line_cache **cache_out);
+extern struct bt_line *bt_cache_fetch(void *sym, struct bt_line_cache **cache_out);
+extern void bt_flush_cache(void);
 
+__END_DECLS
 #endif /* WRAPPER_BACKTRACE_H */

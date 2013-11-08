@@ -168,8 +168,8 @@ extern void get_dvm_backtrace(struct dvm_iface *dvm,
 			      struct bt_state *bt_state,
 			      struct dvm_bt *dvm_bt);
 
-extern void print_dvm_bt(struct dvm_iface *dvm, FILE *logf,
-			 struct dvm_bt *dvm_bt, struct timeval *tv);
+extern void print_dvm_bt(struct dvm_iface *dvm, struct dvm_bt *dvm_bt,
+			 struct log_info *info);
 
 #else /* !ANDROID */
 

@@ -10,11 +10,11 @@
 #include <sys/types.h>
 
 #include "wrap_lib.h"
+#include "backtrace.h"
 
 extern int local_strcmp(const char *s1, const char *s2);
 extern int local_strncmp(const char *s1, const char *s2, size_t n);
 extern pthread_key_t wrap_key;
-extern pthread_key_t s_last_stack_key;
 
 typedef int (*handler_func)(struct log_info *info);
 
@@ -65,6 +65,8 @@ wrap_special(struct log_info *info)
 	case '_':
 		if (sc == 'e' && local_strcmp("xit", info->symbol + 2) == 0)
 			f = handle_exit;
+		else if (sc == '_' && local_strcmp("fork", info->symbol + 2) == 0)
+			f = handle_fork;
 		break;
 	case 'v':
 		if (sc == 'f' && local_strcmp("ork", info->symbol + 2) == 0)
@@ -113,6 +115,8 @@ int handle_exit(struct log_info *info)
 {
 	if (should_log())
 		flush_and_close("EXIT", info);
+	bt_free_log_buffer();
+	bt_flush_cache();
 	return 0;
 }
 
@@ -120,6 +124,8 @@ int handle_fork(struct log_info *info)
 {
 	if (should_log())
 		flush_and_close("FORK", info);
+	bt_free_log_buffer();
+	bt_flush_cache();
 	return 0;
 }
 
@@ -224,23 +230,15 @@ int handle_exec(struct log_info *info)
 		libc_log("I:%s:%s:", info->symbol, (const char *)info->regs[0]);
 		libc_close_log();
 	}
+	bt_flush_cache();
+	bt_free_log_buffer();
 
 	return 0;
 }
 
 int handle_pthread(struct log_info *info)
 {
-	if (s_last_stack_key != (pthread_key_t)-1) {
-		/*
-		 * both the parent, and the new thread will
-		 * re-create the TLS "last_stack" container
-		 */
-		void *mem = libc.pthread_getspecific(s_last_stack_key);
-		if (mem) {
-			libc.free(mem);
-			libc.pthread_setspecific(s_last_stack_key, NULL);
-		}
-	}
+	bt_free_log_buffer();
 	return 0;
 }
 

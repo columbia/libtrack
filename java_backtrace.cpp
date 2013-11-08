@@ -283,7 +283,7 @@ save_current_stack:
 	return ret;
 }
 
-static void print_dvm_sym(FILE *f, struct dvm_iface *dvm,
+static void print_dvm_sym(struct log_info *info, struct dvm_iface *dvm,
 			  int count, struct Method *m)
 {
 	struct bt_line_cache *cache = NULL;
@@ -294,7 +294,7 @@ static void print_dvm_sym(FILE *f, struct dvm_iface *dvm,
 		goto do_lookup;
 
 	if (cline->sym == (void *)m) {
-		libc.fprintf(f, " :%d%s", count, cline->str);
+		__bt_printf(info, " :%d:%s", count, cline->str);
 		return;
 	}
 
@@ -304,31 +304,34 @@ do_lookup:
 	std::string name;
 	name = dvm->dvmHumanReadableMethod(m, DVM_BT_GET_SIGNATURE);
 	if (cline) {
-		libc.snprintf(cline->str, MAX_LINE_LEN, ":%s:\n", name.c_str());
-		libc.fprintf(f, " :%d%s", count, cline->str);
+		libc.snprintf(cline->str, MAX_LINE_LEN, "%s:\n", name.c_str());
+		__bt_printf(info, " :%d:%s", count, cline->str);
 		return;
 	}
 
-	libc.fprintf(f, " :%d:%s:\n", count, name.c_str());
+	__bt_printf(info, " :%d:%s:\n", count, name.c_str());
 }
 
 extern "C"
-void print_dvm_bt(struct dvm_iface *dvm, FILE *logf,
-		  struct dvm_bt *dvm_bt, struct timeval *tv)
+void print_dvm_bt(struct dvm_iface *dvm, struct dvm_bt *dvm_bt,
+		  struct log_info *info)
 {
 	int ii;
 
 	ii = compare_traces(dvm, dvm_bt);
-	if (ii < 0)
-		return; /* this is a repeat stack trace, don't print anything */
-	else if (ii > 1)
-		__log_print(tv, logf, "DVM", "BT_REPEAT:%d:", ii);
+	if (ii < 0) {
+		__bt_printf(info, "DVM:BT_REPEAT:1:\n");
+		return;
+	}
+	/* else if (ii > 1)
+		__bt_printf(info, "DVM:BT_REPEAT:%d:\n", ii);
+	*/
 
-	__log_print(tv, logf, "DVM", "BT_START:%d:", dvm_bt->count);
+	bt_printf(info, "DVM:BT_START:%d:", dvm_bt->count);
 	for (ii = 0; ii < dvm_bt->count; ii++) {
-		print_dvm_sym(logf, dvm, ii, dvm_bt->mlist[ii]);
+		print_dvm_sym(info, dvm, ii, dvm_bt->mlist[ii]);
 	}
 
-	/* __log_print(tv, logf, "DVM", "BT_END"); */
+	/* bt_printf(info, "DVM:BT_END:\n"); */
 	return;
 }

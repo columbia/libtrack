@@ -245,6 +245,7 @@ int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack)
 
 		log_backtrace(logf, &li);
 	} else if (libc.pthread_getspecific(log_key)) {
+		libc.fflush(NULL); /* flush the entire process' logs */
 		libc_close_log();
 	}
 
