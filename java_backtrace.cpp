@@ -182,6 +182,8 @@ void get_dvm_backtrace(struct dvm_iface *dvm,
 	if (!dvm->valid)
 		return;
 
+	dvm_bt->count = 0;
+
 	/*
 	 * Search through the native backtrace for the java stack indicators.
 	 * It should be faster to search up from the bottom of the stack
@@ -196,7 +198,6 @@ void get_dvm_backtrace(struct dvm_iface *dvm,
 			if (_in_range(addr, dvm->dvmCallMethodSym[ii]))
 				goto do_dvm_bt;
 	}
-	dvm_bt->count = 0;
 	return;
 
 	/*
@@ -213,6 +214,7 @@ do_dvm_bt:
 		self = dvm->dvmThreadSelf();
 		if (!self)
 			return;
+		fp = self->interpSave.curFrame;
 
 		tname = (char *)libc.pthread_getspecific(s_dvm_thread_name_key);
 		if (!tname) {
