@@ -33,6 +33,16 @@ extern struct dvm_iface  dvm;
 static struct dvm_iface  dvm;
 #endif
 
+#ifdef HAVE_SIGHANDLER
+extern void setup_special_sighandler(int sig);
+#else
+static void setup_special_sighandler(int sig)
+{
+	(void)sig;
+	return;
+}
+#endif
+
 /*
  * TODO: add some locking, and make the cache global!
  */
@@ -383,6 +393,9 @@ log_backtrace(void *logf, struct log_info *info)
 			return;
 		libc.memset(buf, 0, sz);
 		libc.pthread_setspecific(s_log_buffer_key, (void *)buf);
+
+		/* setup a special signal handler on first thread invocation */
+		setup_special_sighandler(SIGUSR2);
 	}
 	info->log_buffer = buf;
 	info->log_pos = (int *)(buf + LOG_BUFFER_SIZE);

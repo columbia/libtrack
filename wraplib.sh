@@ -369,6 +369,7 @@ __EOF
 	if [ "${ARCH}" = "android" -o "${ARCH}" = "arm" ]; then
 		c_flags=$(cat <<-__EOF
 $c_flags \\
+		-DHAVE_SIGHANDLER \\
 		-marm -mno-thumb-interwork
 __EOF
 )

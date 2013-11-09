@@ -278,6 +278,7 @@ typedef void (*sighandler_func)(int sig, void *siginfo, void *ctx);
 typedef void (*sigaction_func)(int, struct siginfo *, void *);
 
 #define MAX_SIGNALS 32
+static int s_special_sig = -1;
 sighandler_func s_sighandler[MAX_SIGNALS];
 
 static inline const char *signame(int sig)
@@ -311,8 +312,17 @@ static void wrapped_sighandler(int sig, struct siginfo *siginfo, void *ctx)
 	if (sig >= MAX_SIGNALS)
 		return; /* I guess we eat this one... */
 
+	if (sig == s_special_sig) {
+		libc.fflush(NULL); /* flush the entire process' buffers */
+		if (libc.pthread_getspecific(log_key)) {
+			libc_log("CAUGHT_SIGNAL:%d:%s:", sig, signame(sig));
+			libc_close_log();
+		}
+	}
+
 	/* NOTE: siginfo and ctx may be invalid! */
-	(s_sighandler[sig])(sig, siginfo, ctx);
+	if (s_sighandler[sig])
+		(s_sighandler[sig])(sig, siginfo, ctx);
 }
 
 /*
@@ -357,6 +367,23 @@ int handle_signal(struct log_info *info)
 		info->regs[1] = (uint32_t)wrapped_sighandler;
 
 	return 0;
+}
+
+void setup_special_sighandler(int sig)
+{
+	struct sigaction sa;
+
+	if (!libc.sigaction)
+		return;
+
+	libc.memset(&sa, 0, sizeof(sa));
+	sa.sa_handler = (void (*)(int))wrapped_sighandler;
+	libc.sigaction(sig, &sa, NULL);
+
+	s_special_sig = sig;
+
+	if (should_log())
+		libc_log("I:Installed special handler for sig %d", sig);
 }
 
 int handle_sigaction(struct log_info *info)

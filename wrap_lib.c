@@ -361,6 +361,7 @@ int init_libc_iface(struct libc_iface *iface, const char *dso_path)
 	init_sym(iface, 1, getenv,);
 
 	init_sym(iface, 0, strsignal,);
+	init_sym(iface, 0, sigaction,);
 
 	init_sym(iface, 0, __cxa_finalize,);
 	init_sym(iface, 0, raise,);

@@ -97,6 +97,8 @@ struct libc_iface {
 
 	int (*gettimeofday)(struct timeval *tp, void *tzp);
 
+	int (*sigaction)(int sig, const struct sigaction *act,
+			 struct sigaction *oact);
 	char *(*strsignal)(int sig);
 
 	void (*__cxa_finalize)(void *dso);
