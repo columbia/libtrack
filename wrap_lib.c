@@ -126,7 +126,7 @@ static void *table_dlsym(void *dso, const char *sym, int allow_null)
 }
 
 
-static pthread_key_t log_key = (pthread_key_t)(-1);
+pthread_key_t log_key = (pthread_key_t)(-1);
 
 static inline FILE *__open_stdlogfile()
 {

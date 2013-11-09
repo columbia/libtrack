@@ -367,9 +367,11 @@ log_backtrace(void *logf, struct log_info *info)
 {
 	char *buf = NULL;
 
-	if (s_log_buffer_key == -1)
+	if (s_log_buffer_key == -1) {
 		if (libc.pthread_key_create(&s_log_buffer_key, NULL) != 0)
 			return;
+		libc.pthread_setspecific(s_log_buffer_key, NULL);
+	}
 
 	buf = libc.pthread_getspecific(s_log_buffer_key);
 	if (!buf) {
@@ -389,7 +391,7 @@ log_backtrace(void *logf, struct log_info *info)
 	info->last_stack = (void **)(buf + LOG_BUFFER_SIZE + 3*sizeof(int));
 
 	/* initialize Dalvik VM backtracing */
-	if (!dvm.dso)
+	if (!dvm.dso && !dvm.valid)
 		init_dvm_iface(&dvm, DVM_DFLT_DSO_PATH);
 
 	/* TODO: maybe print out function arguments? */

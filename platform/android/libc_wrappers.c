@@ -11,14 +11,19 @@
 
 #include "wrap_lib.h"
 #include "backtrace.h"
+#include "java_backtrace.h"
 
 extern int local_strcmp(const char *s1, const char *s2);
 extern int local_strncmp(const char *s1, const char *s2, size_t n);
 extern pthread_key_t wrap_key;
+extern pthread_key_t log_key;
+
+extern struct dvm_iface dvm;
 
 typedef int (*handler_func)(struct log_info *info);
 
 static int handle_exit(struct log_info *info);
+static int handle_thread_exit(struct log_info *info);
 static int handle_exec(struct log_info *info);
 static int handle_fork(struct log_info *info);
 static int handle_pthread(struct log_info *info);
@@ -77,7 +82,7 @@ wrap_special(struct log_info *info)
 			if (local_strcmp("hread_create", info->symbol+2) == 0)
 				f = handle_pthread;
 			else if (local_strcmp("hread_exit", info->symbol+2) == 0)
-				f = handle_exit;
+				f = handle_thread_exit;
 		}
 		break;
 	case 'b':
@@ -108,22 +113,35 @@ static void flush_and_close(const char *msg, struct log_info *info)
 {
 	void *f;
 
-	f = get_log(1);
-	log_print(f, LOG, "I:%s %s(0x%x,0x%x,0x%x,0x%x)", msg, info->symbol,
-		     info->regs[0], info->regs[1], info->regs[2], info->regs[3]);
-	if (zlib.valid) {
-		zlib.gzflush((struct gzFile *)f, Z_FINISH);
-		zlib.gzclose_w((struct gzFile *)f);
-	} else {
-		libc.fflush((FILE *)f);
-		libc.fclose((FILE *)f);
+	if (should_log() || libc.pthread_getspecific(log_key)) {
+		f = get_log(1);
+		if (!f)
+			return;
+		log_print(f, LOG, "I:%s %s(0x%x,0x%x,0x%x,0x%x)", msg,
+			  info->symbol, info->regs[0], info->regs[1],
+			  info->regs[2], info->regs[3]);
+		if (zlib.valid) {
+			zlib.gzflush((struct gzFile *)f, Z_FINISH);
+			zlib.gzclose_w((struct gzFile *)f);
+		} else {
+			libc.fflush((FILE *)f);
+			libc.fclose((FILE *)f);
+		}
 	}
 }
 
 int handle_exit(struct log_info *info)
 {
-	if (should_log())
-		flush_and_close("EXIT", info);
+	flush_and_close("EXIT", info);
+	close_dvm_iface(&dvm);
+	bt_free_log_buffer();
+	bt_flush_cache();
+	return 0;
+}
+
+int handle_thread_exit(struct log_info *info)
+{
+	flush_and_close("THREAD_EXIT", info);
 	bt_free_log_buffer();
 	bt_flush_cache();
 	return 0;
@@ -131,8 +149,8 @@ int handle_exit(struct log_info *info)
 
 int handle_fork(struct log_info *info)
 {
-	if (should_log())
-		flush_and_close("FORK", info);
+	flush_and_close("FORK", info);
+	close_dvm_iface(&dvm);
 	bt_free_log_buffer();
 	bt_flush_cache();
 	return 0;
@@ -235,10 +253,11 @@ int handle_exec(struct log_info *info)
 	else
 		setup_exec_env();
 
-	if (should_log()) {
+	if (should_log())
 		libc_log("I:%s:%s:", info->symbol, (const char *)info->regs[0]);
+	if (libc.pthread_getspecific(log_key))
 		libc_close_log();
-	}
+	close_dvm_iface(&dvm);
 	bt_flush_cache();
 	bt_free_log_buffer();
 
@@ -247,9 +266,10 @@ int handle_exec(struct log_info *info)
 
 int handle_pthread(struct log_info *info)
 {
-	if (should_log())
-		flush_and_close("PTHREAD", info);
+	flush_and_close("PTHREAD", info);
+	close_dvm_iface(&dvm);
 	bt_free_log_buffer();
+	bt_flush_cache();
 	return 0;
 }
 

@@ -54,6 +54,7 @@ extern struct libc_iface libc;
 struct dvm_iface dvm __attribute__((visibility("hidden")));
 
 static pthread_key_t s_dvm_thread_name_key = (pthread_key_t)(-1);
+static pthread_key_t s_dvm_stack_key = (pthread_key_t)(-1);
 
 
 static void *_find_symbol_end(void *sym_start)
@@ -133,14 +134,16 @@ void init_dvm_iface(struct dvm_iface *dvm, const char *dso_path)
 	 */
 	for (ii = 0; ii < (int)ARRAY_SZ(dvm->dvmCallMethodSym); ii++) {
 		if (!dvm->dvmCallMethodSym[ii][0]) {
-			libc_log("W:Couldn't find dvmCallMethod[A] in libdvm.so");
+			libc_log("W:Couldn't find dvmCallMethod[%d] in libdvm.so", ii);
 		} else {
 			void *end;
 			end = _find_symbol_end(dvm->dvmCallMethodSym[ii][0]);
 			dvm->dvmCallMethodSym[ii][1] = end;
+			/*
 			libc_log("I:dvmCallMethod[%d][%p-%p]:", ii,
 				 dvm->dvmCallMethodSym[ii][0],
 				 dvm->dvmCallMethodSym[ii][1]);
+			 */
 		}
 	}
 
@@ -156,12 +159,29 @@ void init_dvm_iface(struct dvm_iface *dvm, const char *dso_path)
 extern "C"
 void close_dvm_iface(struct dvm_iface *dvm)
 {
-	void *dso = dvm->dso;
+	void *val;
+	void *dso;
+
+	dso = dvm->dso;
 	if (!dvm->dso)
-		return;
+		goto out;
+	dvm->valid = 0;
 	dvm->dso = NULL;
 	dlclose(dso);
 
+	val = (char *)libc.pthread_getspecific(s_dvm_thread_name_key);
+	if (val) {
+		libc.free(val);
+		libc.pthread_setspecific(s_dvm_thread_name_key, NULL);
+	}
+
+	val = libc.pthread_getspecific(s_dvm_stack_key);
+	if (val) {
+		libc.free(val);
+		libc.pthread_setspecific(s_dvm_stack_key, NULL);
+	}
+
+out:
 	libc.memset(dvm, 0, sizeof(*dvm));
 }
 
@@ -226,10 +246,6 @@ do_dvm_bt:
 			libc_log("I:DalvikThreadName:%s:", tname);
 		}
 
-		/*
-		 * I'm sure there are more efficient functions that
-		 * could be called here...
-		 */
 		dvm_bt->count = dvm->dvmComputeExactFrameDepth(fp);
 		if (dvm_bt->count > MAX_BT_FRAMES)
 			dvm_bt->count = MAX_BT_FRAMES;
@@ -237,13 +253,8 @@ do_dvm_bt:
 		dvm->dvmFillStackTraceArray(fp, dvm_bt->mlist, dvm_bt->count);
 	}
 
-	/*
-	 * TODO: check for identical Java backtraces here!
-	 */
 	return;
 }
-
-static pthread_key_t s_dvm_stack_key = (pthread_key_t)(-1);
 
 static int compare_traces(struct dvm_iface *dvm, struct dvm_bt *dvm_bt)
 {
@@ -252,9 +263,11 @@ static int compare_traces(struct dvm_iface *dvm, struct dvm_bt *dvm_bt)
 	int *last_depth, *last_repeat;
 	struct Method **last_meth;
 
-	if (s_dvm_stack_key == (pthread_key_t)(-1))
+	if (s_dvm_stack_key == (pthread_key_t)(-1)) {
 		if (libc.pthread_key_create(&s_dvm_stack_key, NULL) != 0)
 			return 0;
+		libc.pthread_setspecific(s_dvm_stack_key, NULL);
+	}
 
 	last_stack = libc.pthread_getspecific(s_dvm_stack_key);
 	if (!last_stack) {
