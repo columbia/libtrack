@@ -1,0 +1,10 @@
+LOCAL_PATH := $(call my-dir)
+include $(CLEAR_VARS)
+LOCAL_CFLAGS := -fPIC -O3 \
+		-Werror
+LOCAL_CONLYFLAGS := -std=gnu99
+LOCAL_CPPFLAGS := -std=c++0x
+LOCAL_SRC_FILES := tkill.c
+LOCAL_MODULE:= tkill
+LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
+include $(BUILD_EXECUTABLE)
