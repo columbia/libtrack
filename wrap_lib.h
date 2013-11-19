@@ -7,6 +7,7 @@
 
 #include <dlfcn.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <pthread.h>
 #include <unistd.h>
 #include <unwind.h>
@@ -252,9 +253,22 @@ static inline void libc_close_iface(void)
 
 static inline int should_log(void)
 {
-	int r = libc.access(ENABLE_LOG_PATH, F_OK) == 0;
+	int r1 = libc.access(ENABLE_LOG_PATH, F_OK) == 0;
+    int r2 = 0;
+    char pid[4];
+    FILE *f;
+
+    if (!r1){
+        (*__errno()) = 0;
+        return r1;
+    }
+    if ((f=libc.fopen(ENABLE_LOG_PATH, "r")) != NULL){
+        if (libc.fread(pid, sizeof(int), 1, f) == 1)
+            r2 = libc.getpid() == atoi(pid);
+        libc.fclose(f);
+    }
 	(*__errno()) = 0;
-	return r;
+    return r1 && r2;
 }
 
 #define _BUG(X) \
