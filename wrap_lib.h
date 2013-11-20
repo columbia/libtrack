@@ -251,24 +251,30 @@ static inline void libc_close_iface(void)
 	libc.dso = NULL;
 }
 
+static int cached_pid = 0;
+
 static inline int should_log(void)
 {
 	int r1 = libc.access(ENABLE_LOG_PATH, F_OK) == 0;
-    int r2 = 0;
-    char pid[4];
+    char buf[4];
     FILE *f;
 
     if (!r1){
+        cached_pid = 0;
         (*__errno()) = 0;
-        return r1;
+        return r1 ;
     }
-    if ((f=libc.fopen(ENABLE_LOG_PATH, "r")) != NULL){
-        if (libc.fread(pid, sizeof(int), 1, f) == 1)
-            r2 = libc.getpid() == atoi(pid);
+    if (cached_pid){
+        (*__errno()) = 0;
+        return libc.getpid() == cached_pid;
+    }
+    if ((f=libc.fopen(ENABLE_LOG_PATH, "r")) != NULL ){
+        fread(buf, 1, sizeof(int), f);
+        cached_pid = atoi(buf);
         libc.fclose(f);
     }
-	(*__errno()) = 0;
-    return r1 && r2;
+    (*__errno()) = 0;
+    return libc.getpid() == cached_pid;
 }
 
 #define _BUG(X) \
