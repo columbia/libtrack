@@ -165,7 +165,8 @@ static inline struct gzFile *__open_gzlogfile(void)
 		libc.fclose(logf);
 		return NULL;
 	}
-	zlib.gzsetparams(gzlogf, Z_BEST_COMPRESSION, Z_DEFAULT_STRATEGY);
+	//zlib.gzsetparams(gzlogf, Z_BEST_COMPRESSION, Z_DEFAULT_STRATEGY);
+	zlib.gzsetparams(gzlogf, Z_BEST_SPEED, Z_DEFAULT_STRATEGY);
 	log_print(gzlogf, LOG, "BEGIN");
 	zlib.gzflush(gzlogf, Z_FULL_FLUSH);
 	return gzlogf;
