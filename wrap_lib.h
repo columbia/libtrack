@@ -87,6 +87,7 @@ struct libc_iface {
 	int (*snprintf)(char *str, size_t size, const char *format, ...);
 	int (*printf)(const char *fmt, ...);
 	int (*fprintf)(FILE *f, const char *fmt, ...);
+	long (*strtol)(const char *str, char **endptr, int base);
 
 	void *(*memset)(void *b, int c, size_t len);
 	void *(*memcpy)(void *dst, const void *src, size_t len);
@@ -251,30 +252,37 @@ static inline void libc_close_iface(void)
 	libc.dso = NULL;
 }
 
-static int cached_pid = 0;
+extern int cached_pid;
 
 static inline int should_log(void)
 {
-	int r1 = libc.access(ENABLE_LOG_PATH, F_OK) == 0;
-    char buf[4];
-    FILE *f;
+	int r1;
+	char buf[10];
+	FILE *f;
 
-    if (!r1){
-        cached_pid = 0;
-        (*__errno()) = 0;
-        return r1 ;
-    }
-    if (cached_pid){
-        (*__errno()) = 0;
-        return libc.getpid() == cached_pid;
-    }
-    if ((f=libc.fopen(ENABLE_LOG_PATH, "r")) != NULL ){
-        fread(buf, 1, sizeof(int), f);
-        cached_pid = atoi(buf);
-        libc.fclose(f);
-    }
-    (*__errno()) = 0;
-    return libc.getpid() == cached_pid;
+	r1 = libc.access(ENABLE_LOG_PATH, F_OK) == 0;
+	if (!r1){
+		if (cached_pid)
+			libc_close_log();
+		cached_pid = 0;
+		(*__errno()) = 0;
+		return 0;
+	}
+	if (!cached_pid &&
+	    (f=libc.fopen(ENABLE_LOG_PATH, "r")) != NULL){
+		libc.fread(buf, 1, sizeof(buf), f);
+		cached_pid = libc.strtol(buf, NULL, 10);
+		if (!cached_pid)
+			cached_pid = -1;
+		libc.fclose(f);
+	}
+
+	(*__errno()) = 0;
+	if (!cached_pid)
+		return 0;
+	if (cached_pid > 0)
+		return libc.getpid() == cached_pid;
+	return 1;
 }
 
 #define _BUG(X) \

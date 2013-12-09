@@ -209,6 +209,8 @@ void __attribute__((visibility("hidden"))) *get_log(int release)
 	return f;
 }
 
+int cached_pid;
+
 /**
  * @wrapped_dlsym Locate a symbol within a library, possibly loading the lib.
  *
@@ -264,8 +266,11 @@ int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack)
 	}
 
 	/* we're already tracing - disable recursive tracing! */
-	if (libc.pthread_getspecific(s_tracing_key))
+	if (libc.pthread_getspecific(s_tracing_key)) {
+		(*__errno()) = 0;
 		return 0;
+	}
+
 	libc.pthread_setspecific(s_tracing_key, (void *)1);
 
 	li.symbol = symbol;
@@ -293,8 +298,8 @@ int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack)
 
 	ret = wrap_special(&li);
 out:
-	(*__errno()) = 0; /* reset errno: libc functions could have set it! */
 	libc.pthread_setspecific(s_tracing_key, NULL);
+	(*__errno()) = 0; /* reset errno: libc functions could have set it! */
 	return ret;
 }
 
@@ -352,6 +357,7 @@ int init_libc_iface(struct libc_iface *iface, const char *dso_path)
 	init_sym(iface, 1, snprintf,);
 	init_sym(iface, 1, printf,);
 	init_sym(iface, 1, fprintf,);
+	init_sym(iface, 1, strtol,);
 	init_sym(iface, 1, memset,);
 	init_sym(iface, 1, memcpy,);
 	init_sym(iface, 1, malloc,);
