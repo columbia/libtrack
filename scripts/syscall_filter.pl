@@ -123,6 +123,9 @@ my %_never_wrap = ( ".plt" => 1,
 		   "snprintf" => 1,
 		   "vsnprintf" => 1,
 		   "__strncat_chk" => 1,
+		   "sscanf" => 1,
+		   "vscanf" => 1,
+		   "vsscanf" => 1,
 
 		   # pthreads
 		   "pthread_cond_broadcast" => 1,
