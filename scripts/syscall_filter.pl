@@ -126,10 +126,26 @@ my %_never_wrap = ( ".plt" => 1,
 		   "sscanf" => 1,
 		   "vscanf" => 1,
 		   "vsscanf" => 1,
+		   "__strcpy_chk" => 1,
+		   "__strlen_chk" => 1,
+		   "__strcpy_chk" => 1,
+		   "__strcat_chk" => 1,
+		   "__strlen_chk" => 1,
+
+		   # div
+		   "__aeabi_idiv" => 1,
+		   "__aeabi_uidiv" => 1,
+
+		   # rand
+		   "lrand48" => 1,
+
+		   # clock
+		   "clock_gettime" => 1,
 
 		   # pthreads
 		   "pthread_cond_broadcast" => 1,
 		   "pthread_mutex_init" => 1,
+		   "pthread_cond_signal" => 1,
 );
 
 sub never_wrap() {
