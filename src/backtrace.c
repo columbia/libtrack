@@ -292,9 +292,10 @@ static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 			     _UVRSD_UINT32, &frame->regs[3]);
 	libc._Unwind_VRS_Get(context, _UVRSC_CORE, 14,
 			     _UVRSD_UINT32, &frame->lr);
+#endif
+	/* always save the stack pointer */
 	libc._Unwind_VRS_Get(context, _UVRSC_CORE, 13,
 			     _UVRSD_UINT32, &frame->sp);
-#endif
 #endif
 
 	frame->pc = (void *)ip;
@@ -367,6 +368,10 @@ unwind_backtrace(void *logf, struct log_info *info)
 	get_dvm_backtrace(&dvm, &state, &dvm_bt);
 
 	print_bt_state(&state, info);
+
+	/* print stack usage! */
+	bt_printf(info, "BT:STACKMEM:%d:\n",
+		  (unsigned)state.frame[state.count-1].sp - (unsigned)info->stack);
 }
 
 

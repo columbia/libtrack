@@ -17,12 +17,11 @@ __BEGIN_DECLS
 #define MAX_LINE_LEN  256
 
 struct bt_frame {
-	//struct bt_info pc;
 	void *pc;
+	unsigned long sp;
 #ifdef VERBOSE_FRAME_INFO
 	unsigned long reg[4]
 	unsigned long lr;
-	unsigned long sp;
 #endif
 };
 
