@@ -247,11 +247,11 @@ static pthread_key_t s_tracing_key = (pthread_key_t)(-1);
  * @wrapped_tracer Default tracing function that stores a backtrace
  *
  * @param symbol The symbol from which wrapped_tracer is being called
+ * @param symptr Pointer to the function symbol in the wrapped library
  * @param regs Pointer to saved register values
- * @param slots Number of register slots saved in @c regs
  * @param stack Pointer to the top of the stack at function entry
  */
-int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack)
+int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 {
 	int ret = 0;
 	void *logf;
@@ -275,8 +275,8 @@ int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack)
 	libc.pthread_setspecific(s_tracing_key, (void *)1);
 
 	li.symbol = symbol;
+	li.func = symptr;
 	li.regs = (uint32_t *)regs;
-	li.slots = slots;
 	li.stack = stack;
 	li.tv.tv_sec = li.tv.tv_usec = 0;
 

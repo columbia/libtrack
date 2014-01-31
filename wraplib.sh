@@ -341,10 +341,7 @@ __EOF
 	local src_files=$(cat <<-__EOF
 		platform/${ARCH}/crtbegin_so.c \\
 		$(basename "$asm") \\
-		wrap_lib.c \\
-		backtrace.c \\
-		libz.c \\
-		java_backtrace.cpp \\
+		$(ls -1 "${CDIR}/src" | awk '{print $0 " \\"}')
 		platform/${ARCH}/\$(TARGET_ARCH)/crtend_so.S
 __EOF
 )
@@ -479,14 +476,8 @@ __EOF
 	fi
 
 	mkdir -p "$dir" 2>/dev/null
-	ln -s "${CDIR}/backtrace.c" "${dir}" 2>/dev/null
-	ln -s "${CDIR}/backtrace.h" "${dir}" 2>/dev/null
-	ln -s "${CDIR}/java_backtrace.h" "${dir}" 2>/dev/null
-	ln -s "${CDIR}/java_backtrace.cpp" "${dir}" 2>/dev/null
-	ln -s "${CDIR}/libz.h" "${dir}" 2>/dev/null
-	ln -s "${CDIR}/libz.c" "${dir}" 2>/dev/null
-	ln -s "${CDIR}/wrap_lib.c" "${dir}" 2>/dev/null
-	ln -s "${CDIR}/wrap_lib.h" "${dir}" 2>/dev/null
+	find "${CDIR}/src" -type f -exec ln -s "{}" "${dir}" \; 2>/dev/null
+	find "${CDIR}/include" -type f -exec ln -s "{}" "${dir}" \; 2>/dev/null
 	ln -s "${CDIR}/arch" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/platform" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/scripts/Makefile.${ARCH}" "${dir}/Makefile" 2>/dev/null

@@ -150,14 +150,14 @@ STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
  * caller's r0 (on the stack), and sp will point to a copy of the stack
  * registers.
  */
-	MACRO3(save_caller_state, r0reg, nreg, spreg)
+	MACRO2(save_caller_state, r0reg, spreg)
 	unwind_linkage
 	push	{lr}
 	mov	lr, sp
 	push	{r0-r11}
 	mov	_marg(\r0reg,$0), sp
-	mov	_marg(\nreg,$1), #13		/* r0-r11+lr = 13 registers */
-	add	_marg(\spreg,$2), lr, #4	/* pointer to incoming stack */
+	/* mov	_marg(\nreg,$1), #13 */		/* r0-r11+lr = 13 registers */
+	add	_marg(\spreg,$1), lr, #4	/* pointer to incoming stack */
 	ldr	lr, [lr]			/* restore original lr */
 	.endm /* save_caller_state */
 
@@ -205,7 +205,7 @@ ENTRY(_marg(\pfx,$2)_marg(\wrapsym,$1))
 	 *   put number of registers saved in r6
 	 *   put pointer to incoming stack in r8
 	 */
-	save_caller_state r4, r6, r8
+	save_caller_state r4, r8
 
 	/* lookup wrapped func address */
 	symaddr	r5, marg(__wrapsym_,\wrapsym,$1)
@@ -226,14 +226,15 @@ ENTRY(_marg(\pfx,$2)_marg(\wrapsym,$1))
 5:	/* call any defined "tracing" function */
 #ifdef WRAP_TRACE_FUNC
 	/* prototype:
-	   void wrapper(const char *symbol, void *regs, int slots, void *stack);
+	   void wrapper(const char *symbol, void *symptr,
+			void *regs, void *stack);
 	 */
 	symaddr r0, marg(__wrapstr_,\wrapsym,$1)
-	mov	r1, r4
-	mov	r2, r6
-	mov	r3, r8
+	mov	r1, r5 /* pointer to function symbol */
+	mov	r2, r4 /* pointer to register set */
+	mov	r3, r8 /* stack pointer */
 	bl	_FN(WRAP_TRACE_FUNC)
-#endif
+#endif /* WRAP_TRACE_FUNC */
 	/* restore registers and make the original function call */
 6:	mov	ip, r5
 	restore_caller_state r4
@@ -261,7 +262,7 @@ ENTRY(_marg(\wrapsym,$1))
 	cmp	ip, #0
 	bne	6f
 	/* search for the symbol and cache it */
-	save_caller_state r4, r6, r8
+	save_caller_state r4, r8
 	symaddr	r0, marg(__wraplib_path_,\wraplib,$0)
 	symaddr	r1, marg(__libhandle_,\wraplib,$0)
 	symaddr	r2, marg(__wrapstr_,\wrapsym,$1)

@@ -129,7 +129,7 @@ extern int init_libc_iface(struct libc_iface *iface, const char *dso_path);
 
 extern void *wrapped_dlsym(const char *libpath, void **lib_handle, const char *symbol);
 
-extern int wrapped_tracer(const char *symbol, void *regs, int slots, void *stack);
+extern int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack);
 
 extern void setup_tls_stack(int align, void *regs, int slots);
 
@@ -141,8 +141,8 @@ extern volatile int*  __errno(void);
 
 struct log_info {
 	const char *symbol;
+	void *func;
 	uint32_t *regs;
-	int slots;
 	void *stack;
 	struct timeval tv;
 
