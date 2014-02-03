@@ -35,7 +35,7 @@ struct bt_state {
 	void *f;
 };
 
-extern void bt_free_log_buffer(void);
+extern void bt_free_log_buffer(int release_key);
 
 
 struct bt_line {
@@ -71,7 +71,7 @@ struct bt_line_cache {
 
 
 extern struct bt_line *bt_cache_fetch(void *sym, struct bt_line_cache **cache_out);
-extern void bt_flush_cache(void);
+extern void bt_flush_cache(int release_key);
 
 __END_DECLS
 #endif /* WRAPPER_BACKTRACE_H */

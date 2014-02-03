@@ -329,6 +329,8 @@ function __setup_wrapped_lib() {
 	local asm="$2"
 	local module_name="$(basename "${asm%.*}")_wrapped"
 
+	local extra_S_hdr=
+
 	local c_flags=$(cat <<-__EOF
 		-fPIC -O3 \\
 		-DHAVE_ARM_TLS_REGISTER \\
@@ -388,6 +390,12 @@ __EOF
 )
 	fi
 
+	# We have a special wrapper return handling function
+	# on ARM Android that we hook in here
+	if [ "${ARCH}" = "android" ]; then
+		extra_S_hdr="#define WRAP_RETURN_FUNC wrapped_return"
+	fi
+
 	# We have to set these variables here to pick up
 	# any new definitions of LIB, LIBPATH, etc.
 	FILE_HEADER=$(cat -<<__EOF
@@ -399,6 +407,7 @@ __EOF
  *
  */
 #define WRAP_TRACE_FUNC wrapped_tracer
+${extra_S_hdr}
 #include <asm/wrap_start.h>
 
 WRAP_LIB(${LIB}, ${LIBPATH})
@@ -408,6 +417,9 @@ __EOF
 	FILE_FOOTER=$(cat -<<__EOF
 #include <asm/wrap_end.h>
 #undef WRAP_TRACE_FUNC
+#ifdef WRAP_RETURN_FUNC
+#undef WRAP_RETURN_FUNC
+#endif
 __EOF
 )
 	ANDROID_MK=$(cat -<<__EOF
@@ -441,6 +453,7 @@ __EOF
 		ANDROID_MK=$(cat -<<__EOF
 $ANDROID_MK
 LOCAL_C_INCLUDES := \$(LOCAL_PATH)/platform/android/\$(TARGET_ARCH)/include \\
+		\$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include \\
 		external/stlport/stlport \\
 		bionic \\
 		bionic/libstdc++/include

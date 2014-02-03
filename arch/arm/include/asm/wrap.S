@@ -234,8 +234,19 @@ ENTRY(_marg(\pfx,$2)_marg(\wrapsym,$1))
 	mov	r2, r4 /* pointer to register set */
 	mov	r3, r8 /* stack pointer */
 	bl	_FN(WRAP_TRACE_FUNC)
+#ifdef WRAP_RETURN_FUNC
+	cmp	r0, #0
+	beq	6f
+	/* If we get here, then the wrapper indicated we're NOT to call
+	 * the original function (perhaps it already has). Restore the
+	 * caller state (including LR) and branch to the WRAP_RETURN
+	 * function.
+	 */
+	symaddr	r5, _FN(WRAP_RETURN_FUNC)
+#endif /* WRAP_RETURN_FUNC */
 #endif /* WRAP_TRACE_FUNC */
-	/* restore registers and make the original function call */
+	/* restore registers and make the original function call
+	 * (or jump to special return routine) */
 6:	mov	ip, r5
 	restore_caller_state r4
 	bx	ip

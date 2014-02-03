@@ -162,7 +162,7 @@ struct dvm_iface {
 
 extern void init_dvm_iface(struct dvm_iface *dvm, const char *dso_path);
 
-extern void close_dvm_iface(struct dvm_iface *dvm);
+extern void close_dvm_iface(struct dvm_iface *dvm, int release_key);
 
 extern void get_dvm_backtrace(struct dvm_iface *dvm,
 			      struct bt_state *bt_state,

@@ -67,6 +67,7 @@ typedef _Unwind_Reason_Code (*bt_func)(__unwind_context* context, void* arg);
 
 struct libc_iface {
 	void *dso;
+	int   wrap_cache;
 
 	FILE *(*fopen)(const char *pathname, const char *mode);
 	int (*fclose)(FILE *f);
@@ -81,8 +82,12 @@ struct libc_iface {
 	uint32_t (*gettid)(void);
 
 	int (*pthread_key_create)(pthread_key_t *key, void (*destructor)(void *));
+	int (*pthread_key_delete)(pthread_key_t key);
 	void *(*pthread_getspecific)(pthread_key_t key);
 	int (*pthread_setspecific)(pthread_key_t key, const void *val);
+
+	int (*pthread_mutex_lock)(pthread_mutex_t *mutex);
+	int (*pthread_mutex_unlock)(pthread_mutex_t *mutex);
 
 	int (*snprintf)(char *str, size_t size, const char *format, ...);
 	int (*printf)(const char *fmt, ...);
@@ -127,13 +132,15 @@ extern struct libc_iface libc;
 
 extern int init_libc_iface(struct libc_iface *iface, const char *dso_path);
 
+extern int setup_tls_retval(void);
+
 extern void *wrapped_dlsym(const char *libpath, void **lib_handle, const char *symbol);
 
 extern int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack);
 
-extern void setup_tls_stack(int align, void *regs, int slots);
-
 extern void *get_log(int release);
+
+extern void __delete_pth_key(pthread_key_t *key);
 
 extern volatile int*  __errno(void);
 
@@ -146,6 +153,10 @@ struct log_info {
 	void *stack;
 	struct timeval tv;
 
+	uint8_t should_log;
+	uint8_t symhash;
+	void *symcache;
+
 	void **last_stack;
 	int   *last_stack_depth;
 	int   *last_stack_cnt;
@@ -153,6 +164,35 @@ struct log_info {
 	char  *log_buffer;
 	int   *log_pos;
 };
+
+/*
+ * TODO: this should probably be platform/arch specific...
+ */
+struct ret_ctx {
+	/* for now we'll have space for 4 32-bit registers */
+	union {
+		uint64_t u64[2];
+		uint32_t u32[4];
+		uint16_t u16[8];
+		uint8_t  u8[16];
+	} u;
+	const char *sym;
+};
+
+extern void setup_retmem(void);
+extern void clear_retmem(int release_key);
+extern struct ret_ctx *get_retmem(void);
+
+extern void setup_tracing(void);
+extern void clear_tracing(int release_key);
+
+#define mtx_lock(mtx) \
+	if (libc.pthread_mutex_lock && libc.pthread_mutex_unlock) \
+		libc.pthread_mutex_lock(mtx)
+
+#define mtx_unlock(mtx) \
+	if (libc.pthread_mutex_lock && libc.pthread_mutex_unlock) \
+		libc.pthread_mutex_unlock(mtx)
 
 #define __bt_printf(info, fmt, ...) \
 do { \

@@ -9,6 +9,7 @@
 #include <unwind.h>
 #include <sys/types.h>
 
+#include <asm/wrap_lib.h>
 #include "wrap_lib.h"
 #include "backtrace.h"
 #include "java_backtrace.h"
@@ -26,6 +27,8 @@
 #define FRAMES_TO_SKIP 3
 
 extern struct libc_iface libc;
+
+extern void wrap_symbol_mod(struct log_info *info);
 
 #ifdef ANDROID
 extern struct dvm_iface  dvm;
@@ -68,7 +71,7 @@ static struct bt_line_cache *get_bt_line_cache(void)
 	return cache;
 }
 
-void bt_flush_cache(void)
+void bt_flush_cache(int release_key)
 {
 	void *cache;
 
@@ -81,6 +84,8 @@ void bt_flush_cache(void)
 		libc.free(cache);
 		libc.pthread_setspecific(s_line_cache_key, NULL);
 	}
+	if (release_key)
+		__delete_pth_key(&s_line_cache_key);
 }
 
 struct bt_line *bt_cache_fetch(void *sym, struct bt_line_cache **cache_out)
@@ -134,6 +139,7 @@ static inline void print_info(struct log_info *info, int count, void *sym)
 	char c;
 	struct bt_line_cache *cache = NULL;
 	struct bt_line *cline;
+	const char *symname;
 	Dl_info dli;
 
 	cline = bt_cache_fetch(sym, &cache);
@@ -173,19 +179,21 @@ do_lookup:
 			(unsigned long)sym;
 	}
 
+	symname = dli.dli_sname ? dli.dli_sname : "??";
+	if (count == 0)
+		symname = info->symbol;
+
 	if (cline) {
 		libc.snprintf(cline->str, MAX_LINE_LEN,
 			      "%x:%s:%c0x%x:%s(%p):\n",
-			      (unsigned int)sym,
-			      dli.dli_sname ? dli.dli_sname : "??",
+			      (unsigned int)sym, symname,
 			      c, ofst, dli.dli_fname, dli.dli_fbase);
 		__bt_printf(info, " :%d:%s", count, cline->str);
 		return;
 	}
 
 	__bt_printf(info, " :%d:0x%x:%s:%c0x%x:%s(%p):\n",
-		    count, (unsigned int)sym,
-		    dli.dli_sname ? dli.dli_sname : "??",
+		    count, (unsigned int)sym, symname,
 		    c, ofst, dli.dli_fname, dli.dli_fbase);
 }
 
@@ -323,6 +331,7 @@ unwind_backtrace(void *logf, struct log_info *info)
 {
 	Dl_info dli;
 	int i;
+	unsigned stack_sz;
 	struct bt_state state;
 	struct dvm_bt dvm_bt;
 
@@ -370,12 +379,14 @@ unwind_backtrace(void *logf, struct log_info *info)
 	print_bt_state(&state, info);
 
 	/* print stack usage! */
-	bt_printf(info, "BT:STACKMEM:%d:\n",
-		  (unsigned)state.frame[state.count-1].sp - (unsigned)info->stack);
+	stack_sz = (unsigned)state.frame[state.count-1].sp
+			+ WRAPPER_STACK_SZ
+			- (unsigned)info->stack;
+	bt_printf(info, "BT:STACKMEM:%d:\n", stack_sz);
 }
 
 
-static pthread_key_t s_log_buffer_key = (pthread_key_t)-1;
+pthread_key_t s_log_buffer_key = (pthread_key_t)-1;
 
 void __attribute__((visibility("hidden"))) __attribute__((noinline))
 log_backtrace(void *logf, struct log_info *info)
@@ -412,6 +423,14 @@ log_backtrace(void *logf, struct log_info *info)
 	if (!dvm.dso && !dvm.valid)
 		init_dvm_iface(&dvm, DVM_DFLT_DSO_PATH);
 
+	/*
+	 * Use a cache/table to modify info->symbol based on the function
+	 * called and its arguments. This allows us to track FDs through the
+	 * system and mark their access as network, FS, pipe, etc. by
+	 * translating the symbol name to, e.g., read_N (for network read).
+	 */
+	wrap_symbol_mod(info);
+
 	/* TODO: maybe print out function arguments? */
 	if (libc.backtrace)
 		std_backtrace(logf, info);
@@ -423,7 +442,7 @@ log_backtrace(void *logf, struct log_info *info)
 	bt_flush(info, logf);
 }
 
-void bt_free_log_buffer(void)
+void bt_free_log_buffer(int release_key)
 {
 	if (s_log_buffer_key != (pthread_key_t)-1) {
 		/*
@@ -437,4 +456,6 @@ void bt_free_log_buffer(void)
 			libc.pthread_setspecific(s_log_buffer_key, NULL);
 		}
 	}
+	if (release_key)
+		__delete_pth_key(&s_log_buffer_key);
 }

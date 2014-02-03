@@ -157,7 +157,7 @@ void init_dvm_iface(struct dvm_iface *dvm, const char *dso_path)
 }
 
 extern "C"
-void close_dvm_iface(struct dvm_iface *dvm)
+void close_dvm_iface(struct dvm_iface *dvm, int release_key)
 {
 	void *val;
 	void *dso;
@@ -183,6 +183,11 @@ void close_dvm_iface(struct dvm_iface *dvm)
 
 out:
 	libc.memset(dvm, 0, sizeof(*dvm));
+
+	if (release_key) {
+		__delete_pth_key(&s_dvm_thread_name_key);
+		__delete_pth_key(&s_dvm_stack_key);
+	}
 }
 
 static inline int _in_range(void *v, void *range[])
