@@ -42,9 +42,7 @@ static int handle_accept(struct log_info *info);
 static int handle_closefd(struct log_info *info);
 static int handle_closefptr(struct log_info *info);
 
-static int handle_read(struct log_info *info);
-static int handle_write(struct log_info *info);
-
+static int handle_rename_fd1(struct log_info *info);
 
 /*
  * keep a table of valid file descriptors and their types
@@ -222,6 +220,9 @@ void setup_wrap_cache(void)
 	add_entry("close", handle_closefd, 1, 0);
 	add_entry("dup", handle_dup, 1, 0);
 	add_entry("dup2", handle_dup, 1, 0);
+	/* TODO: add_entry("epoll_create", handle_epoll, 1, 0); */
+	/* TODO: add_entry("epoll_ctl", handle_epoll, 1, 0); */
+	/* TODO: add_entry("epoll_wait", handle_epoll, 1, 0); */
 	add_entry("exit", handle_exit, 1, 0);
 	add_entry("exec", handle_exec, 1, 0);
 	add_entry("fclose", handle_closefptr, 1, 0);
@@ -244,12 +245,23 @@ void setup_wrap_cache(void)
 	add_entry("vfork", handle_fork, 1, 0);
 
 	/* setup functions we want to dynamically rename in the BT */
-	add_entry("read", handle_read, 0, 1);
-	add_entry("readv", handle_read, 0, 1);
-	add_entry("pread64", handle_read, 0, 1);
-	add_entry("write", handle_write, 0, 1);
-	add_entry("writev", handle_write, 0, 1);
-	add_entry("pwrite64", handle_write, 0, 1);
+	add_entry("read", handle_rename_fd1, 0, 1);
+	add_entry("readv", handle_rename_fd1, 0, 1);
+	add_entry("pread", handle_rename_fd1, 0, 1);
+	add_entry("pread64", handle_rename_fd1, 0, 1);
+	add_entry("write", handle_rename_fd1, 0, 1);
+	add_entry("writev", handle_rename_fd1, 0, 1);
+	add_entry("pwrite", handle_rename_fd1, 0, 1);
+	add_entry("pwrite64", handle_rename_fd1, 0, 1);
+	add_entry("ioctl", handle_rename_fd1, 0, 1);
+	add_entry("__ioctl", handle_rename_fd1, 0, 1);
+	add_entry("fcntl", handle_rename_fd1, 0, 1);
+	add_entry("__fcntl", handle_rename_fd1, 0, 1);
+	add_entry("__fcntl64", handle_rename_fd1, 0, 1);
+	/* TODO: select / epoll ? */
+	/* TODO: fdprintf ? */
+	/* TODO: fstatfs ? */
+	/* TODO: mmap ? */
 }
 
 /**
@@ -936,12 +948,25 @@ int handle_closefptr(struct log_info *info)
 	return 0;
 }
 
-int handle_read(struct log_info *info)
+int handle_rename_fd1(struct log_info *info)
 {
-	return 0;
-}
+	int fd;
+	char type;
+	struct ret_ctx *ret;
 
-int handle_write(struct log_info *info)
-{
+	/*
+	 * symbols: read, readv, pread, pread64
+	 *          write, writev, pwrite, pwrite64
+	 *          ioctl, __ioctl, fcntl, __fcntl
+	 * all have fd as first argument!
+	 */
+	fd = (int)info->regs[0];
+	type = get_fdtype(fd);
+
+	ret = get_retmem();
+	libc.snprintf(ret->symmod, MAX_SYMBOL_LEN, "%s_%c",
+		      info->symbol, type ? type : '_');
+	info->symbol = (const char *)ret->symmod;
+
 	return 0;
 }

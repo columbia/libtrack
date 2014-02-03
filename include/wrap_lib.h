@@ -168,6 +168,7 @@ struct log_info {
 /*
  * TODO: this should probably be platform/arch specific...
  */
+#define MAX_SYMBOL_LEN 256
 struct ret_ctx {
 	/* for now we'll have space for 4 32-bit registers */
 	union {
@@ -176,6 +177,7 @@ struct ret_ctx {
 		uint16_t u16[8];
 		uint8_t  u8[16];
 	} u;
+	char symmod[MAX_SYMBOL_LEN];
 	const char *sym;
 };
 
