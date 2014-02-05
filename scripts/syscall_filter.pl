@@ -65,6 +65,9 @@ sub never_wrap_re() {
 my %_never_wrap = ( ".plt" => 1,
 		   "__libc_init" => 1,
 		   "__errno" => 1,
+		   "__aeabi_atexit" => 1,
+		   "__cxa_atexit" => 1,
+		   "__cxa_finalize" => 1,
 
 		   # unwind functions
 		   "_Unwind_Resume" => 1,
