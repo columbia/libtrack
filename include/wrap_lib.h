@@ -5,19 +5,33 @@
 #ifndef WRAP_LIB_H
 #define WRAP_LIB_H
 
+//#define AGGRESIVE_FLUSHING
+//#define LIBC_DEBUG_LOCKING
+
 #include <dlfcn.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
+#include <time.h>
 #include <unistd.h>
 #include <unwind.h>
 #include <sys/cdefs.h>
+
+__BEGIN_DECLS
 
 #include "libz.h"
 
 #define ___str(x) #x
 #define __str(x) ___str(x)
 #define _str(x) __str(x)
+
+#ifndef container_of
+#define container_of(ptr, type, member) ({			\
+	const typeof( ((type *)0)->member ) *__mptr = (ptr);	\
+	(type *)( (char *)__mptr - offsetof(type,member) );})
+#endif
+
+#define __hidden __attribute__((visibility("hidden")))
 
 #define ARRAY_SZ(arr) \
 	(sizeof(arr) / sizeof((arr)[0]))
@@ -55,8 +69,6 @@
 
 #define LIBC_PATH LIB_PATH "/" LIBC_NAME
 
-__BEGIN_DECLS
-
 #if defined(HAVE_UNWIND_CONTEXT_STRUCT) || defined(__clang__)
 typedef struct _Unwind_Context __unwind_context;
 #else
@@ -64,10 +76,72 @@ typedef _Unwind_Context __unwind_context;
 #endif
 typedef _Unwind_Reason_Code (*bt_func)(__unwind_context* context, void* arg);
 
+#ifdef LIBC_DEBUG_LOCKING
+#define MAX_TRACE_THREADS 512
+#define LOCK_TRACE_MAGIC  0xf00d4311
+typedef struct lock_holder {
+	uint32_t magic;
+	struct lock_holder *next;
+	struct lock_holder *prev;
+	uint32_t tid;
+	const char *sym;
+	int refcnt;
+} *trace_ptr_t;
+
+#define lh_valid(lh) \
+	(lh != NULL && (lh)->magic == (uint32_t)LOCK_TRACE_MAGIC)
+
+#define lh_new(sym, fastlookup) \
+	__lh_new(sym, fastlookup)
+
+#define lh_free(lh) \
+	__lh_free(lh)
+
+#define lh_sym(lh) \
+	((lh) ? (lh)->sym : (const char *)NULL)
+
+#define lh_tid(lh) \
+	((lh) ? (lh)->tid : (uint32_t)(-1))
+
+#define lh_add(__lh) \
+	if ((__lh) != NULL) { \
+		libc.lh.prev->next = __lh; \
+		(__lh)->prev = libc.lh.prev; \
+		(__lh)->next = &(libc.lh); \
+		libc.lh.prev = __lh; \
+	}
+
+#define lh_del(lh) \
+	if ((lh) != NULL) { \
+		if ((lh)->prev != (lh)) \
+			(lh)->prev->next = (lh)->next; \
+		if ((lh)->next != (lh)) \
+			(lh)->next->prev = (lh)->prev; \
+	}
+
+#define lh_empty(lh) \
+	(!(lh) || (lh)->prev == (lh) && (lh)->next == (lh))
+
+#define lh_foreach(__lh) \
+	for (__lh = libc.lh.next; (__lh) != &(libc.lh); __lh = (__lh)->next)
+
+#else
+typedef const char * trace_ptr_t;
+#define lh_valid(lh)  (lh != NULL)
+#define lh_new(sym,x) (trace_ptr_t)(sym)
+#define lh_free(lh)   ((void)(lh))
+#define lh_sym(lh)    ((const char *)(lh))
+#define lh_tid(lh)    (libc.gettid())
+#define lh_add(x)
+#define lh_del(x)
+#define lh_empty(x) 0
+#define lh_foreach(x) while (0)
+#endif /* LIBC_DEBUG_LOCKING */
 
 struct libc_iface {
 	void *dso;
 	int   wrap_cache;
+	int   forking;
 
 	FILE *(*fopen)(const char *pathname, const char *mode);
 	int (*fclose)(FILE *f);
@@ -80,11 +154,19 @@ struct libc_iface {
 
 	pid_t (*getpid)(void);
 	uint32_t (*gettid)(void);
+	int (*nanosleep)(const struct timespec *req, struct timespec *rem);
 
 	int (*pthread_key_create)(pthread_key_t *key, void (*destructor)(void *));
 	int (*pthread_key_delete)(pthread_key_t key);
 	void *(*pthread_getspecific)(pthread_key_t key);
 	int (*pthread_setspecific)(pthread_key_t key, const void *val);
+
+#ifdef ANDROID
+	void (*__pthread_cleanup_push)(__pthread_cleanup_t *c,
+				       __pthread_cleanup_func_t func,
+				       void *arg);
+	void (*__pthread_cleanup_pop)(__pthread_cleanup_t *c, int execute);
+#endif
 
 	int (*pthread_mutex_lock)(pthread_mutex_t *mutex);
 	int (*pthread_mutex_unlock)(pthread_mutex_t *mutex);
@@ -126,21 +208,62 @@ struct libc_iface {
 					      void *valuep);
 #endif
 	uintptr_t (*_Unwind_Backtrace)(bt_func func, void *arg);
+
+#ifdef LIBC_DEBUG_LOCKING
+	struct lock_holder lh;
+#endif
 };
 
 extern struct libc_iface libc;
 
-extern int init_libc_iface(struct libc_iface *iface, const char *dso_path);
+extern int cached_pid;
 
-extern int setup_tls_retval(void);
+struct tls_info;
+
+extern int  __get_libc(struct tls_info *tls, const char *symbol);
+extern void __put_libc(void);
+
+extern int init_libc_iface(struct libc_iface *iface, const char *dso_path);
 
 extern void *wrapped_dlsym(const char *libpath, void **lib_handle, const char *symbol);
 
 extern int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack);
 
 extern void *get_log(int release);
+extern void *__get_log(int release);
 
-extern void __delete_pth_key(pthread_key_t *key);
+extern void libc_close_log(void);
+
+static inline int should_log(void)
+{
+	int err;
+	char buf[10];
+	FILE *f;
+
+	err = libc.access(ENABLE_LOG_PATH, F_OK);
+	if (err < 0) {
+		if (cached_pid)
+			libc_close_log();
+		cached_pid = 0;
+		return 0;
+	}
+	if (!cached_pid &&
+	    (f = libc.fopen(ENABLE_LOG_PATH, "r")) != NULL) {
+		cached_pid = -1;
+		if (libc.fread(buf, sizeof(buf), 1, f) > 0)
+			cached_pid = libc.strtol(buf, NULL, 10);
+		if (!cached_pid)
+			cached_pid = -1;
+		libc.fclose(f);
+	}
+
+	if (!cached_pid)
+		return 0;
+	if (cached_pid > 0)
+		return libc.getpid() == cached_pid;
+	/* if cached_pid < 0, then always log */
+	return 1;
+}
 
 extern volatile int*  __errno(void);
 
@@ -154,6 +277,8 @@ struct log_info {
 	struct timeval tv;
 
 	uint8_t should_log;
+	uint8_t should_handle;
+	uint8_t should_mod_sym;
 	uint8_t symhash;
 	void *symcache;
 
@@ -177,16 +302,15 @@ struct ret_ctx {
 		uint16_t u16[8];
 		uint8_t  u8[16];
 	} u;
+	int _errno;
 	char symmod[MAX_SYMBOL_LEN];
 	const char *sym;
 };
 
-extern void setup_retmem(void);
-extern void clear_retmem(int release_key);
-extern struct ret_ctx *get_retmem(void);
+extern struct ret_ctx *get_retmem(struct tls_info *tls);
 
-extern void setup_tracing(void);
-extern void clear_tracing(int release_key);
+#define is_main() \
+	((uint32_t)libc.getpid() == libc.gettid())
 
 #define mtx_lock(mtx) \
 	if (libc.pthread_mutex_lock && libc.pthread_mutex_unlock) \
@@ -196,37 +320,8 @@ extern void clear_tracing(int release_key);
 	if (libc.pthread_mutex_lock && libc.pthread_mutex_unlock) \
 		libc.pthread_mutex_unlock(mtx)
 
-#define __bt_printf(info, fmt, ...) \
-do { \
-	if ((info)->log_buffer && (*(info)->log_pos < LOG_BUFFER_SIZE)) { \
-		int __len = libc.snprintf((info)->log_buffer + *(info)->log_pos, \
-					  LOG_BUFFER_SIZE - *(info)->log_pos, \
-					  fmt, ## __VA_ARGS__ ); \
-		*(info)->log_pos += __len; \
-	} else { \
-		libc_log("E:Buffer overrun!"); \
-	} \
-} while (0)
-
-#define bt_printf(info, fmt, ...) \
-	__bt_printf(info, "%lu.%lu:" fmt, \
-		    (unsigned long)((info)->tv.tv_sec), \
-		    (unsigned long)((info)->tv.tv_usec), ## __VA_ARGS__ )
-
-#define bt_flush(info, logf) \
-	if (*((info)->log_pos) > 0) { \
-		if (zlib.valid) \
-			zlib.gzwrite((struct gzFile *)(logf), \
-				     (info)->log_buffer, *(info)->log_pos); \
-		else \
-			libc.fwrite((info)->log_buffer, \
-				    *((info)->log_pos), 1, (FILE *)(logf)); \
-		*(info)->log_pos = 0; \
-	}
-
-
 #define __log_print_raw(tvptr, f, fmt, ...) \
-	do { \
+	if (f) { \
 	if (zlib.valid) \
 		zlib.gzprintf((struct gzFile *)(f), "%lu.%lu:" fmt, \
 			     (unsigned long)(tvptr)->tv_sec, \
@@ -235,33 +330,47 @@ do { \
 		libc.fprintf((FILE *)(f), "%lu.%lu:" fmt, \
 			     (unsigned long)(tvptr)->tv_sec, \
 			     (unsigned long)(tvptr)->tv_usec, ## __VA_ARGS__ ); \
-	} while (0)
+	}
 
 #define __log_print(tvptr, f, key, fmt, ...) \
 	__log_print_raw(tvptr, f, key ":" fmt "\n", ## __VA_ARGS__ )
 
 #define log_print(f, key, fmt, ...) \
-	do { \
+	if (f) { \
 		struct timeval tv; \
 		libc.gettimeofday(&tv, NULL); \
 		__log_print(&tv, f, #key, fmt, ## __VA_ARGS__ ); \
-	} while (0)
+	}
 
 #define libc_log(fmt, ...) \
 	do { \
-		void *f; \
-		f = get_log(0); \
-		if (f) \
-			log_print(f, LOG, fmt, ## __VA_ARGS__ ); \
+		struct tls_info *tls = peek_tls(); \
+		if (!tls) \
+			break; \
+		if (zlib.valid && tls->logbuffer) { \
+			bt_printf(tls, fmt, ## __VA_ARGS__); \
+			bt_flush(tls, &(tls->info)); \
+		} else { \
+			log_print(tls->logfile, LOG, fmt, ## __VA_ARGS__ ); \
+		} \
+		log_flush(tls->logfile); \
 	} while (0)
 
 #define log_flush(f) \
-	do { \
-	if (zlib.valid) \
-		zlib.gzflush((struct gzFile *)(f), Z_SYNC_FLUSH); \
-	else \
-		libc.fflush((FILE *)f); \
-	} while (0)
+	if (f) { \
+		if (zlib.valid) \
+			zlib.gzflush((struct gzFile *)(f), Z_FULL_FLUSH); \
+		else \
+			libc.fflush((FILE *)f); \
+	}
+
+#define log_close(f) \
+	if (f) { \
+		if (zlib.valid) \
+			zlib.gzclose((struct gzFile *)f); \
+		else \
+			libc.fclose((FILE *)(f)); \
+	}
 
 #define lnk_dbg(msg) \
 	do { \
@@ -269,82 +378,82 @@ do { \
 		(void)dlsym(real_libc_dso, "LOG:" msg); \
 	} while (0)
 
-static inline void libc_close_log(void)
-{
-	void *f;
-	f = get_log(1);
-	if (f) {
-		log_print(f, LOG, "END");
-		if (zlib.valid) {
-			zlib.gzflush((struct gzFile *)f, Z_FINISH);
-			zlib.gzclose_w((struct gzFile *)f);
-		} else {
-			libc.fflush((FILE *)f);
-			libc.fclose((FILE *)f);
-		}
-	}
+
+#define __bt_flush(logfile, logbuffer, pos) \
+{ \
+	if (zlib.valid) \
+		zlib.gzwrite((struct gzFile *)(logfile), (logbuffer), *(pos)); \
+	else \
+		libc.fwrite((logbuffer), *(pos), 1, (FILE *)(logfile)); \
 }
 
-static inline void libc_close_iface(void)
-{
-	if (!libc.dso)
-		return;
-	libc_close_log();
-	dlclose(libc.dso);
-	libc.dso = NULL;
-}
-
-extern int cached_pid;
-
-static inline int should_log(void)
-{
-	int r1;
-	char buf[10];
-	FILE *f;
-
-	r1 = libc.access(ENABLE_LOG_PATH, F_OK) == 0;
-	if (!r1){
-		if (cached_pid)
-			libc_close_log();
-		cached_pid = 0;
-		(*__errno()) = 0;
-		return 0;
-	}
-	if (!cached_pid &&
-	    (f=libc.fopen(ENABLE_LOG_PATH, "r")) != NULL){
-		libc.fread(buf, 1, sizeof(buf), f);
-		cached_pid = libc.strtol(buf, NULL, 10);
-		if (!cached_pid)
-			cached_pid = -1;
-		libc.fclose(f);
+#define bt_flush(tls, info) \
+	if ((tls) && (tls)->logfile && (info)->log_pos && *((info)->log_pos) > 0) { \
+		__bt_flush((tls)->logfile, (info)->log_buffer, (info)->log_pos); \
+		*((info)->log_pos) = 0; \
 	}
 
-	(*__errno()) = 0;
-	if (!cached_pid)
-		return 0;
-	if (cached_pid > 0)
-		return libc.getpid() == cached_pid;
-	return 1;
-}
+#ifdef AGGRESIVE_FLUSHING
+#define BT_EXTRA_FLUSH(tls,info) \
+	{ \
+		bt_flush(tls, info); \
+		if (tls) { log_flush((tls)->logfile); } \
+	}
+#else
+#define BT_EXTRA_FLUSH(tls,info)
+#endif
+
+/*
+ * I'm keeping this as a macro to avoid vararg processing
+ */
+#define __bt_printf(____tls, fmt, ...) \
+	do { \
+		int __len, __remain; \
+		int *__log_pos; \
+		if (!(____tls) || !(____tls)->info.log_pos) \
+			break; \
+		__log_pos = (____tls)->info.log_pos; \
+		__remain = LOG_BUFFER_SIZE - *__log_pos - sizeof(int) - 1; \
+		if (__remain <= 1) { \
+			bt_flush(____tls, &(____tls)->info); \
+			__remain = LOG_BUFFER_SIZE - *__log_pos \
+				   - sizeof(int) - 1; \
+		} \
+		__len = libc.snprintf((____tls)->info.log_buffer + *__log_pos, \
+				      __remain, fmt, ## __VA_ARGS__ ); \
+		if (__len > __remain) { \
+			if (!(*__log_pos)) { \
+				/* the line is just too long... */ \
+				*__log_pos += __remain; \
+				bt_flush(____tls, &(____tls)->info); \
+				log_print((____tls)->logfile, LOG, "E:TRUNCATED!"); \
+				break; \
+			} \
+			bt_flush(____tls, &(____tls)->info); \
+			continue; /* try again */ \
+		} \
+		*__log_pos += __len; \
+		BT_EXTRA_FLUSH(____tls, &(____tls)->info); \
+	} while (0)
+
+#define bt_printf(__tls, fmt, ...) \
+	__bt_printf(__tls, "%lu.%lu:" fmt, \
+		    (unsigned long)((__tls)->info.tv.tv_sec), \
+		    (unsigned long)((__tls)->info.tv.tv_usec), ## __VA_ARGS__ )
 
 #define _BUG(X) \
 	do { \
-		if (libc.fflush) \
-			libc.fflush(NULL); \
-		*((volatile int *)X) = X; \
+		*((volatile int *)(0xFFFF0000 | (uint32_t)(X))) = X; \
 	} while (0)
 
 #define BUG(X) \
 	do { \
 		void *f; \
-		f = get_log(1); \
+		f = __get_log(1); \
 		if (f) { \
 			log_print(f, _BUG_, "(0x%x) at %s:%d", X, __FILE__, __LINE__); \
 			log_flush(f); \
-			if (zlib.valid) \
-				zlib.gzclose_w((struct gzFile *)f); \
-			else \
-				libc.fclose((FILE *)(f)); \
+			log_close(f); \
 		} \
 		_BUG(X); \
 	} while (0)
@@ -352,15 +461,12 @@ static inline int should_log(void)
 #define BUG_MSG(X,fmt,...) \
 	do { \
 		void *f; \
-		f = get_log(1); \
+		f = __get_log(1); \
 		if (f) { \
 			log_print(f, _BUG_, "(0x%x) at %s:%d", X, __FILE__, __LINE__); \
 			log_print(f, _BUG_, fmt, ## __VA_ARGS__ ); \
 			log_flush(f); \
-			if (zlib.valid) \
-				zlib.gzclose_w((struct gzFile *)f); \
-			else \
-				libc.fclose((FILE *)(f)); \
+			log_close(f); \
 		} \
 		_BUG(X); \
 	} while (0)

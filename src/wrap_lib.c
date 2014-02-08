@@ -10,28 +10,29 @@
 #include <unistd.h>
 #include <sys/types.h>
 
+#include <asm/wrap_lib.h>
+
 #include "wrap_lib.h"
-
-const char *progname = NULL;
-
-/* from backtrace.c */
-extern void log_backtrace(void *logf, struct log_info *info);
+#include "backtrace.h"
+#include "java_backtrace.h"
 
 /* from platform specific code */
 extern void setup_wrap_cache(void);
 
 /* lib-specific wrapping handlers (e.g. [v]fork in libc) */
 #ifdef HAVE_WRAP_SPECIAL
-extern int wrap_special(struct log_info *info);
+extern int wrap_special(struct tls_info *tls);
 #else
-static inline int wrap_special(struct log_info *info)
+static inline int wrap_special(struct tls_info *tls)
 {
 	(void)info;
 	return 0;
 }
 #endif
 
-const char __attribute__((visibility("hidden")))
+const char *progname = NULL;
+
+const char __hidden
 * local_strrchr(const char *str, int c)
 {
 	const char *s = str;
@@ -42,7 +43,7 @@ const char __attribute__((visibility("hidden")))
 	return NULL;
 }
 
-int __attribute__((visibility("hidden")))
+int __hidden
 local_strcmp(const char *s1, const char *s2)
 {
 	while (*s1 == *s2++)
@@ -51,7 +52,7 @@ local_strcmp(const char *s1, const char *s2)
 	return (*(unsigned char *)s1 - *(unsigned char *)--s2);
 }
 
-int __attribute__((visibility("hidden")))
+int __hidden
 local_strncmp(const char *s1, const char *s2, size_t n)
 {
 	if (n == 0)
@@ -65,22 +66,30 @@ local_strncmp(const char *s1, const char *s2, size_t n)
 	return 0;
 }
 
-struct libc_iface libc __attribute__((visibility("hidden")));
+struct libc_iface libc __hidden;
+
+#ifdef LIBC_DEBUG_LOCKING
+static pthread_mutex_t libc_mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
+#endif
 
 /*
  * Symbol table / information
  *
  */
+#undef TEXT_SIZE
 #undef SAVED
 #undef SYM
+#define TEXT_SIZE(size)
 #define SAVED(addr,name) #name
 #define SYM(addr,name)
 static const char *wrapped_sym=
 #include "real_syms.h"
 ;
+#undef TEXT_SIZE
 #undef SAVED
 #undef SYM
 
+#define TEXT_SIZE(size)
 #define SAVED(addr,name)
 #define SYM(addr,name) { #name, (unsigned long)(addr) },
 struct symbol {
@@ -90,10 +99,39 @@ struct symbol {
 #include "real_syms.h"
 	{ NULL, 0 },
 };
+#undef TEXT_SIZE
+#undef SAVED
+#undef SYM
+
+#define TEXT_SIZE(size) size
+#define SAVED(addr,name)
+#define SYM(addr,name)
+static int wrapped_text_size =
+#include "real_syms.h"
+;
+#undef TEXT_SIZE
+#undef SAVED
+#undef SYM
+
+int cached_pid = 0;
 
 static Dl_info wrapped_dli;
+static Dl_info dl_dli;
 
-pthread_key_t s_retmem_key __attribute__((visibility("hidden"))) = -1;
+/*
+ * Is the given address within the TEXT section of our wrapped library?
+ */
+static int is_in_wrapped_text(unsigned long addr, const char *sym)
+{
+	unsigned long start, end;
+
+	start = (unsigned long)wrapped_dli.dli_fbase;
+	end = start + (unsigned long)wrapped_text_size;
+	if (addr >= start && addr < end)
+		return 1;
+
+	return 0;
+}
 
 /*
  * Use our internal offset table to locate the symbol within the
@@ -128,9 +166,6 @@ static void *table_dlsym(void *dso, const char *sym, int allow_null)
 	return (void *)((char *)wrapped_dli.dli_fbase + symbol->offset);
 }
 
-
-pthread_key_t log_key = (pthread_key_t)(-1);
-
 static inline FILE *__open_stdlogfile()
 {
 	FILE *logf;
@@ -144,8 +179,6 @@ static inline FILE *__open_stdlogfile()
 	if (!logf)
 		return NULL;
 	libc.fchmod(libc.fno(logf), 0666);
-	log_print(logf, LOG, "BEGIN");
-	libc.fflush(logf);
 	return logf;
 }
 
@@ -170,29 +203,31 @@ static inline struct gzFile *__open_gzlogfile(void)
 	}
 	//zlib.gzsetparams(gzlogf, Z_BEST_COMPRESSION, Z_DEFAULT_STRATEGY);
 	zlib.gzsetparams(gzlogf, Z_BEST_SPEED, Z_DEFAULT_STRATEGY);
-	log_print(gzlogf, LOG, "BEGIN");
 	zlib.gzflush(gzlogf, Z_FULL_FLUSH);
 	return gzlogf;
 }
 
-void __attribute__((visibility("hidden"))) *get_log(int release)
+static void ___open_log(struct tls_info *tls, int acquire_new, void **logf)
 {
 	void *f;
 
+	if (logf)
+		*logf = NULL;
+
+	if (!tls)
+		return;
+	if (libc.dso == (void *)1)
+		return;
 	if (!libc.dso) {
 		if (init_libc_iface(&libc, LIBC_PATH) < 0)
 			_BUG(0x10);
 	}
+
 	if (!zlib.dso)
 		init_zlib_iface(&zlib, ZLIB_DFLT_PATH);
 
-	if (log_key == (pthread_key_t)(-1)) {
-		libc.pthread_key_create(&log_key, NULL);
-		libc.pthread_setspecific(log_key, NULL);
-	}
-
-	f = libc.pthread_getspecific(log_key);
-	if (!f) {
+	f = tls->logfile;
+	if (!f && acquire_new) {
 		if (zlib.valid) {
 			f = (void *)__open_gzlogfile();
 			if (!f) {
@@ -202,21 +237,78 @@ void __attribute__((visibility("hidden"))) *get_log(int release)
 			}
 		} else
 			f = (void *)__open_stdlogfile();
-		libc.pthread_setspecific(log_key, f);
+
+		tls->logfile = f;
+		log_print(f, LOG, "BEGIN(%s)", lh_sym(tls->lh));
+		log_flush(f);
 	}
+
+	if (logf)
+		*logf = f;
+}
+
+static void *___get_log(int release, int acquire_new)
+{
+	struct tls_info *tls;
+	void *f = NULL;
+
+	if (acquire_new)
+		tls = get_tls();
+	else
+		tls = peek_tls();
+	if (!tls)
+		return NULL;
+
+	___open_log(tls, acquire_new, &f);
+
 	if (release)
-		libc.pthread_setspecific(log_key, NULL);
+		tls->logfile = NULL;
+
 	return f;
 }
 
-void __delete_pth_key(pthread_key_t *key)
+/* this version won't open a new log */
+void __hidden *__get_log(int release)
 {
-	pthread_key_t k = *key;
-	*key = (pthread_key_t)-1;
-	libc.pthread_key_delete(k);
+	return ___get_log(release, 0);
 }
 
-int cached_pid;
+/* this version _will_ open a new logfile */
+void __hidden *get_log(int release)
+{
+	return ___get_log(release, 1);
+}
+
+void __hidden tls_release_logfile(struct tls_info *tls)
+{
+	void *f;
+
+	if (!tls)
+		return;
+
+	f = tls->logfile;
+	if (!f)
+		return;
+
+	bt_flush(tls, &tls->info);
+	tls->logfile = NULL;
+
+
+	log_print(f, LOG, "END(%s)", lh_sym(tls->lh));
+	log_flush(f);
+	log_close(f);
+}
+
+void __hidden libc_close_log(void)
+{
+	struct tls_info *tls;
+
+	tls = get_tls();
+	if (!tls || !tls->logfile)
+		return;
+
+	tls_release_logfile(tls);
+}
 
 /**
  * @wrapped_dlsym Locate a symbol within a library, possibly loading the lib.
@@ -247,7 +339,152 @@ void *wrapped_dlsym(const char *libpath, void **lib_handle, const char *symbol)
 	return sym;
 }
 
-static pthread_key_t s_tracing_key = (pthread_key_t)(-1);
+#ifdef LIBC_DEBUG_LOCKING
+static pthread_mutex_t th_mtx = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
+static struct lock_holder s_th_array[MAX_TRACE_THREADS];
+
+void __hidden __lh_clear(void)
+{
+	mtx_lock(&th_mtx);
+	libc.memset(s_th_array, 0, sizeof(s_th_array));
+	mtx_unlock(&th_mtx);
+}
+
+static inline struct lock_holder *__lh_lookup(int tid)
+{
+	int i;
+	for (i = 0; i < MAX_TRACE_THREADS; i++) {
+		if (lh_valid(&s_th_array[i]) && (int)s_th_array[i].tid == tid) {
+			s_th_array[i].refcnt += 1;
+			if (s_th_array[i].refcnt > 1) {
+				libc_log("W:LIBC:sym(\"%s\") has recursively called libc from \"%s\" (refcnt=%d)",
+					 symbol, s_th_array[i].sym, s_th_array[i].refcnt);
+			}
+			return &s_th_array[i]; /* alreay have one! */
+		}
+	}
+	return NULL;
+}
+
+static inline struct lock_holder *__lh_new(const char *symbol, int fastlookup)
+{
+	int i, tid;
+	struct lock_holder *lh;
+
+	tid = libc.gettid();
+	if (fastlookup) {
+		lh = __lh_lookup(tid);
+		if (lh)
+			return lh;
+	}
+
+	mtx_lock(&th_mtx);
+	for (i = 0; i < MAX_TRACE_THREADS; i++) {
+		if (!lh_valid(&s_th_array[i])) {
+			s_th_array[i].magic = LOCK_TRACE_MAGIC;
+			s_th_array[i].next = s_th_array[i].prev = &s_th_array[i];
+			s_th_array[i].tid = tid;
+			s_th_array[i].sym = symbol;
+			s_th_array[i].refcnt = 1;
+			mtx_unlock(&th_mtx);
+			return &s_th_array[i];
+		}
+	}
+	mtx_unlock(&th_mtx);
+
+	return NULL;
+}
+
+static void __lh_free(struct lock_holder *lh)
+{
+	if (!lh_valid(lh)) {
+		void *f = get_log(0);
+		libc_log("E:LIBC:Invalid lock_holder @%p!", lh);
+		log_flush(f);
+		return;
+	}
+
+	if (--(lh->refcnt) != 0) {
+		void *f = get_log(0);
+		libc_log("W:LIBC:someone still holding sym(\"%s\") lock, refcnt=%d",
+			 lh->sym, lh->refcnt);
+		log_flush(f);
+	}
+}
+#else
+void __hidden __lh_clear(void)
+{
+}
+#endif /* LIBC_LOCK_DEBUGGING */
+
+void __hidden tls_release_lh(struct tls_info *tls)
+{
+	trace_ptr_t lh;
+
+	if (!tls)
+		return;
+	
+	lh = tls->lh;
+	if (!lh_valid(lh))
+		return;
+
+	tls->lh = NULL;
+
+#ifdef LIBC_LOCK_DEBUGGING
+	mtx_lock(&libc_mutex);
+	lh_del(lh);
+	mtx_unlock(&libc_mutex);
+#endif
+
+	lh_free(lh);
+}
+
+int __hidden __get_libc(struct tls_info *tls, const char *symbol)
+{
+	int i;
+	trace_ptr_t lh;
+
+	if (!tls)
+		return 0;
+
+	lh = tls->lh;
+
+	/* we're already tracing - disable recursion */
+	if (lh == (trace_ptr_t)1 || lh_valid(lh))
+		return 0;
+
+	tls->lh = (trace_ptr_t)1;
+
+#ifdef LIBC_LOCK_DEBUGGING
+	lh = __lh_lookup(libc.gettid());
+	if (lh_valid(lh)) {
+		void *f = get_log(0);
+		libc_log("D:LIBC:(\"%s\") already held by \"%s\" (%d), how did we get here?!",
+			 symbol,
+			 lh_valid(lh) ? lh_sym(lh) : "<invalid>",
+			 lh_valid(lh) ? lh_tid(lh) : (uint32_t)(-1));
+		tls->lh = lh;
+		return 0;
+	}
+#endif
+
+	/* acquire a lock_holder structure and add to the list */
+	lh = lh_new(symbol, 0);
+	tls->lh = lh;
+
+#ifdef LIBC_LOCK_DEBUGGING
+	mtx_lock(&libc_mutex);
+	lh_add(lh);
+	mtx_unlock(&libc_mutex);
+#endif
+
+	return 1;
+}
+
+void __hidden __put_libc(void)
+{
+	tls_release_lh(peek_tls());
+}
 
 /**
  * @wrapped_tracer Default tracing function that stores a backtrace
@@ -259,68 +496,88 @@ static pthread_key_t s_tracing_key = (pthread_key_t)(-1);
  */
 int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 {
-	int ret = 0;
-	void *logf;
-	struct log_info li;
+	int did_wrap = 0, _err;
+	struct tls_info *tls;
 
+	if (!regs || !stack || !symbol)
+		return 0;
+
+	/* a libc function was called during libc init (probably from dlopen) */
+	if (libc.dso == (void *)1)
+		return 0;
+
+	/*
+	 * don't trace anything that originates from the wrapped library:
+	 * this is an implementation detail, and we don't want it.
+	 */
+	if (is_in_wrapped_text(((uint32_t *)regs)[REG_LR_IDX], symbol))
+		return 0;
+
+	_err = *__errno();
 	if (!libc.dso) {
 		if (init_libc_iface(&libc, LIBC_PATH) < 0)
-			BUG(0x30);
+			BUG(0x31);
 	}
 
-	setup_tracing();
+	/* initialized once per process */
 	setup_wrap_cache();
 
-	/* we're already tracing - disable recursive tracing! */
-	if (libc.pthread_getspecific(s_tracing_key)) {
-		(*__errno()) = 0;
+	tls = get_tls();
+	if (!tls)
+		return 0;
+
+	if (!__get_libc(tls, symbol)) {
+		(*__errno()) = _err;
 		return 0;
 	}
 
-	libc.pthread_setspecific(s_tracing_key, (void *)1);
+	tls->info.regs = (uint32_t *)regs;
+	tls->info.symbol = symbol;
+	tls->info.func = symptr;
+	tls->info.stack = stack;
+	tls->info.tv.tv_sec = tls->info.tv.tv_usec = 0;
+	tls->info.symhash = 0;
+	tls->info.symcache = NULL;
 
-	setup_retmem();
+	tls->info.should_log = should_log();
 
-	li.symbol = symbol;
-	li.func = symptr;
-	li.regs = (uint32_t *)regs;
-	li.stack = stack;
-	li.tv.tv_sec = li.tv.tv_usec = 0;
-	li.symhash = 0;
-	li.symcache = NULL;
-
-	li.should_log = should_log();
-
-	if (li.should_log) {
-		libc.gettimeofday(&li.tv, NULL);
-		logf = get_log(0);
-		if (!logf)
+	if (tls->info.should_log) {
+		void *f;
+		libc.gettimeofday(&tls->info.tv, NULL);
+		init_dvm(&dvm);
+		___open_log(tls, 1, &f);
+		if (!f)
 			goto out;
-		if (!regs && !stack) {
-			log_print(logf, CALL, "%s", symbol);
-			log_flush(logf);
-			goto out;
-		}
-
-		log_backtrace(logf, &li);
-	} else if (log_key != (pthread_key_t)(-1) &&
-		   libc.pthread_getspecific(log_key)) {
-		libc.fflush(NULL); /* flush the entire process' logs */
-		libc_close_log();
+		log_backtrace(tls);
+	} else if (tls->logfile) {
+		/*
+		 * We get here is we're not logging, but we have a logfile
+		 * open. This happens when we disable tracing. We'll close
+		 * the logfile to ensure consistent state.
+		 */
+		tls_release_logfile(tls);
 	}
 
-	ret = wrap_special(&li);
+	/* perform any special actions */
+	did_wrap = wrap_special(tls);
+
 out:
-	if (s_tracing_key != (pthread_key_t)-1)
-		libc.pthread_setspecific(s_tracing_key, NULL);
-	if (!ret)
-		(*__errno()) = 0; /* reset errno: libc functions could have set it! */
-	return ret;
+	__put_libc();
+
+	/*
+	 * reset errno if we didn't wrap, if we _did_ wrap the wrapped_return
+	 * function will handle the error value
+	 */
+	if (!did_wrap)
+		(*__errno()) = _err;
+
+	return did_wrap;
 }
 
-int init_libc_iface(struct libc_iface *iface, const char *dso_path)
+int __hidden init_libc_iface(struct libc_iface *iface, const char *dso_path)
 {
 	if (!iface->dso) {
+		iface->dso = (void *)1; /* in case dlopen needs any libc symbols */
 		iface->dso = dlopen(dso_path, RTLD_NOW | RTLD_LOCAL);
 		if (!iface->dso)
 			_BUG(0x40);
@@ -366,10 +623,16 @@ int init_libc_iface(struct libc_iface *iface, const char *dso_path)
 	init_sym(iface, 1, access,);
 	init_sym(iface, 1, getpid,);
 	init_sym(iface, 1, gettid, __thread_selfid);
+	init_sym(iface, 1, nanosleep,);
 	init_sym(iface, 1, pthread_key_create,);
 	init_sym(iface, 1, pthread_key_delete,);
 	init_sym(iface, 1, pthread_getspecific,);
 	init_sym(iface, 1, pthread_setspecific,);
+
+#ifdef ANDROID
+	init_sym(iface, 1, __pthread_cleanup_push,);
+	init_sym(iface, 1, __pthread_cleanup_pop,);
+#endif
 
 	init_sym(iface, 0, pthread_mutex_lock,);
 	init_sym(iface, 0, pthread_mutex_unlock,);
@@ -412,68 +675,21 @@ int init_libc_iface(struct libc_iface *iface, const char *dso_path)
 
 #undef init_sym
 
+	iface->memset(&dvm, 0, sizeof(dvm));
+
+#ifdef LIBC_DEBUG_LOCKING
+	iface->lh.next = iface->lh.prev = &(iface->lh);
+	iface->lh.tid = 0;
+	iface->lh.sym = "[root]";
+#endif
 	return 0;
 }
 
-void setup_retmem(void)
+struct ret_ctx __hidden *get_retmem(struct tls_info *tls)
 {
-	void *mem;
-
-	if (s_retmem_key == (pthread_key_t)-1) {
-		libc.pthread_key_create(&s_retmem_key, NULL);
-		libc.pthread_setspecific(s_retmem_key, NULL);
-	}
-
-	mem = libc.pthread_getspecific(s_retmem_key);
-	if (mem)
-		return;
-
-	/* setup space for the wrapping code to save return values */
-	mem = libc.malloc(sizeof(struct ret_ctx));
-	if (!mem)
-		return;
-
-	libc.memset(mem, 0, sizeof(struct ret_ctx));
-
-	if (libc.pthread_setspecific(s_retmem_key, mem) < 0) {
-		libc.free(mem);
-		return;
-	}
-
-	return;
+	if (!tls)
+		tls = get_tls();
+	if (!tls)
+		return NULL;
+	return &tls->ret;
 }
-
-void clear_retmem(int release_key)
-{
-	void *mem;
-
-	mem = libc.pthread_getspecific(s_retmem_key);
-	if (mem) {
-		libc.pthread_setspecific(s_retmem_key, NULL);
-		libc.free(mem);
-	}
-
-	if (release_key)
-		__delete_pth_key(&s_retmem_key);
-}
-
-struct ret_ctx *get_retmem(void)
-{
-	return (struct ret_ctx *)libc.pthread_getspecific(s_retmem_key);
-}
-
-void setup_tracing(void)
-{
-	if (s_tracing_key == (pthread_key_t)(-1)) {
-		libc.pthread_key_create(&s_tracing_key, NULL);
-		libc.pthread_setspecific(s_tracing_key, NULL);
-	}
-}
-
-void clear_tracing(int release_key)
-{
-	libc.pthread_setspecific(s_tracing_key, NULL);
-	if (release_key)
-		__delete_pth_key(&s_tracing_key);
-}
-

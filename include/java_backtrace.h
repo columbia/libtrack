@@ -8,10 +8,13 @@
 #include <sys/cdefs.h>
 __BEGIN_DECLS
 
+#include "backtrace.h"
+#include "wrap_lib.h"
+#include "wrap_tls.h"
+
 #ifdef ANDROID
 
 #include <stdint.h>
-#include "backtrace.h"
 
 #ifndef DVM_BT_GET_SIGNATURE
 #define DVM_BT_GET_SIGNATURE false
@@ -160,16 +163,20 @@ struct dvm_iface {
 #endif
 };
 
+extern struct dvm_iface dvm;
+
 extern void init_dvm_iface(struct dvm_iface *dvm, const char *dso_path);
+extern void init_dvm(struct dvm_iface *dvm);
 
-extern void close_dvm_iface(struct dvm_iface *dvm, int release_key);
+extern void close_dvm_iface(struct dvm_iface *dvm);
 
-extern void get_dvm_backtrace(struct dvm_iface *dvm,
+extern void get_dvm_backtrace(struct tls_info *tls,
+			      struct dvm_iface *dvm,
 			      struct bt_state *bt_state,
 			      struct dvm_bt *dvm_bt);
 
-extern void print_dvm_bt(struct dvm_iface *dvm, struct dvm_bt *dvm_bt,
-			 struct log_info *info);
+extern void print_dvm_bt(struct tls_info *tls, struct dvm_iface *dvm,
+			 struct dvm_bt *dvm_bt);
 
 #else /* !ANDROID */
 
@@ -179,9 +186,21 @@ struct dvm_iface {
 	char dso;
 };
 
+static struct dvm_iface dvm;
+
 struct dvm_bt {
 	char count;
 };
+
+static inline void get_dvm(struct dvm_iface *dvm)
+{
+	(void)dvm;
+}
+
+static inline void put_dvm(struct dvm_iface *dvm)
+{
+	(void)dvm;
+}
 
 static inline void init_dvm_iface(struct dvm_iface *dvm, const char *dso_path)
 {
@@ -198,7 +217,8 @@ static void close_dvm_iface(struct dvm_iface *dvm)
 	return;
 }
 
-static inline void get_dvm_backtrace(struct dvm_iface *dvm,
+static inline void get_dvm_backtrace(struct tls_info *tls,
+				     struct dvm_iface *dvm,
 				     struct bt_state *bt_state,
 				     struct dvm_bt *dvm_bt)
 {
@@ -208,12 +228,13 @@ static inline void get_dvm_backtrace(struct dvm_iface *dvm,
 	return;
 }
 
-static inline void print_dvm_bt(struct dvm_iface *dvm, FILE *logf,
-				struct dvm_bt *dvm_bt, struct timeval *tv)
+static void print_dvm_bt(struct tls_info *tls, struct dvm_iface *dvm,
+			 struct dvm_bt *dvm_bt)
 {
-	(void)logf;
+	(void)tls;
+	(void)dvm;
 	(void)dvm_bt;
-	(void)tv;
+	(void)info;
 	return;
 }
 

@@ -678,9 +678,13 @@ function strip_elf_library() {
 	${ELF_OBJDUMP} -T "$out" | grep "DF\s\+\.text\s\+" \
 			| awk -F' ' '{print $6}' > "${tf_funclist}"
 
+	# Save the size of the text section
+	${ELF_READELF} -t "$out" | grep -A1 "\.text" | tail -1 | awk '{print "TEXT_SIZE(0x"$4")"}' > "${symtable}"
+
+	# Extract a non-function symbol and remember its name and address
 	${ELF_READELF} -s "$out" | grep -v FUNC | grep -v UND \
 			| tail -n +4 | head -1 \
-			| awk '{print "SAVED(0x"$2","$8")"}' > "${symtable}"
+			| awk '{print "SAVED(0x"$2","$8")"}' >> "${symtable}"
 
 	# The 'STRIP' variable here points to our custom 'elfmod.py' script
 	# that modifies ELF libraries in-place

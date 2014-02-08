@@ -49,13 +49,16 @@
 #define sym_DVM_HumanReadableMethod	_Z22dvmHumanReadableMethodPK6Methodb
 #define sym_DVM_GetThreadName		_Z16dvmGetThreadNameP6Thread
 
-extern struct libc_iface libc;
-
 struct dvm_iface dvm __attribute__((visibility("hidden")));
 
-static pthread_key_t s_dvm_thread_name_key = (pthread_key_t)(-1);
-static pthread_key_t s_dvm_stack_key = (pthread_key_t)(-1);
+#define TLS_DVM_STACK_SZ \
+	(((MAX_BT_FRAMES) * sizeof(struct Method *)) + (2 * sizeof(int)))
 
+#define dvmstk_last_depth(buf) ((int *)((char *)(buf)))
+#define dvmstk_repeat(buf)     ((int *)((char *)(buf) + sizeof(int)))
+#define dvmstk_metharr(buf)    ((struct Method **)((char *)(buf) + 2*sizeof(int)))
+
+static char main_dvmstack[TLS_DVM_STACK_SZ];
 
 static void *_find_symbol_end(void *sym_start)
 {
@@ -86,6 +89,7 @@ void init_dvm_iface(struct dvm_iface *dvm, const char *dso_path)
 	if (dvm->dso)
 		return;
 
+	dvm->dso = (void *)1;
 	dvm->dso = dlopen(dso_path, RTLD_NOW | RTLD_LOCAL);
 	if (!dvm->dso) {
 		libc_log("E:Could not open libdvm (%s)!", dso_path);
@@ -147,47 +151,31 @@ void init_dvm_iface(struct dvm_iface *dvm, const char *dso_path)
 		}
 	}
 
-	if (s_dvm_thread_name_key == (pthread_key_t)(-1)) {
-		libc.pthread_key_create(&s_dvm_thread_name_key, NULL);
-		libc.pthread_setspecific(s_dvm_thread_name_key, NULL);
-	}
-
 	dvm->valid = 1;
 	return;
 }
 
 extern "C"
-void close_dvm_iface(struct dvm_iface *dvm, int release_key)
+void init_dvm(struct dvm_iface *dvm)
 {
-	void *val;
+	if (!dvm)
+		return;
+	if (!dvm->dso && !dvm->valid)
+		init_dvm_iface(dvm, DVM_DFLT_DSO_PATH);
+}
+
+extern "C"
+void close_dvm_iface(struct dvm_iface *dvm)
+{
 	void *dso;
 
 	dso = dvm->dso;
-	if (!dvm->dso)
-		goto out;
 	dvm->valid = 0;
-	dvm->dso = NULL;
+	if (!dvm->dso || dvm->dso == (void *)1)
+		return;
+	dvm->dso = (void *)1;
 	dlclose(dso);
-
-	val = (char *)libc.pthread_getspecific(s_dvm_thread_name_key);
-	if (val) {
-		libc.free(val);
-		libc.pthread_setspecific(s_dvm_thread_name_key, NULL);
-	}
-
-	val = libc.pthread_getspecific(s_dvm_stack_key);
-	if (val) {
-		libc.free(val);
-		libc.pthread_setspecific(s_dvm_stack_key, NULL);
-	}
-
-out:
-	libc.memset(dvm, 0, sizeof(*dvm));
-
-	if (release_key) {
-		__delete_pth_key(&s_dvm_thread_name_key);
-		__delete_pth_key(&s_dvm_stack_key);
-	}
+	dvm->dso = NULL;
 }
 
 static inline int _in_range(void *v, void *range[])
@@ -198,13 +186,12 @@ static inline int _in_range(void *v, void *range[])
 }
 
 extern "C"
-void get_dvm_backtrace(struct dvm_iface *dvm,
-			      struct bt_state *bt_state,
-			      struct dvm_bt *dvm_bt)
+void get_dvm_backtrace(struct tls_info *tls, struct dvm_iface *dvm,
+		       struct bt_state *bt_state, struct dvm_bt *dvm_bt)
 {
 	int cnt;
 
-	if (!dvm->valid)
+	if (!dvm->valid || !tls)
 		return;
 
 	dvm_bt->count = 0;
@@ -241,13 +228,14 @@ do_dvm_bt:
 			return;
 		fp = self->interpSave.curFrame;
 
-		tname = (char *)libc.pthread_getspecific(s_dvm_thread_name_key);
-		if (!tname) {
+		tname = tls->dvm_threadname;
+		if (!tname[0]) {
+			int len;
 			std::string nm = dvm->dvmGetThreadName(self);
-			tname = (char *)libc.malloc(nm.length() + 1);
-			libc.memset(tname, 0, nm.length() + 1);
-			libc.memcpy(tname, nm.c_str(), nm.length());
-			libc.pthread_setspecific(s_dvm_thread_name_key, tname);
+			len = nm.length();
+			if (len >= TLS_MAX_STRING_LEN)
+				len = TLS_MAX_STRING_LEN - 1;
+			libc.memcpy(tname, nm.c_str(), len);
 			libc_log("I:DalvikThreadName:%s:", tname);
 		}
 
@@ -261,32 +249,62 @@ do_dvm_bt:
 	return;
 }
 
-static int compare_traces(struct dvm_iface *dvm, struct dvm_bt *dvm_bt)
+static char *__setup_dvmstack(struct tls_info *tls, int **last_depth,
+			      int **last_repeat, struct Method ***last_meth)
+{
+	char *last_stack;
+	if (!tls)
+		return NULL;
+
+	last_stack = tls->dvmstack;
+	if (!last_stack) {
+		if (is_main())
+			last_stack = main_dvmstack;
+		else
+			last_stack = (char *)libc.malloc(TLS_DVM_STACK_SZ);
+		if (!last_stack)
+			return NULL;
+		libc.memset(last_stack, 0, TLS_DVM_STACK_SZ);
+		tls->dvmstack = last_stack;
+	}
+
+	*last_depth = dvmstk_last_depth(last_stack);
+	*last_repeat = dvmstk_repeat(last_stack);
+	*last_meth = dvmstk_metharr(last_stack);
+
+	return last_stack;
+}
+
+void tls_release_dvmstack(struct tls_info *tls)
+{
+	char *stack;
+
+	if (!tls)
+		return;
+
+	stack = tls->dvmstack;
+	if (!stack)
+		return;
+
+	libc.memset(stack, 0, TLS_DVM_STACK_SZ);
+
+	if (stack != main_dvmstack)
+		libc.free(tls->dvmstack);
+
+	tls->dvmstack = NULL;
+}
+
+static int compare_traces(struct tls_info *tls,
+			  struct dvm_iface *dvm, struct dvm_bt *dvm_bt)
 {
 	char *last_stack = NULL;
 	int ii, ret;
 	int *last_depth, *last_repeat;
 	struct Method **last_meth;
 
-	if (s_dvm_stack_key == (pthread_key_t)(-1)) {
-		if (libc.pthread_key_create(&s_dvm_stack_key, NULL) != 0)
-			return 0;
-		libc.pthread_setspecific(s_dvm_stack_key, NULL);
-	}
-
-	last_stack = libc.pthread_getspecific(s_dvm_stack_key);
-	if (!last_stack) {
-		int sz = ((MAX_BT_FRAMES) * sizeof(struct Method *))
-				+ (2 * sizeof(int));
-		last_stack = (char *)libc.malloc(sz);
-		if (!last_stack)
-			return 0;
-		libc.memset(last_stack, 0, sz);
-		libc.pthread_setspecific(s_dvm_stack_key, (void *)last_stack);
-	}
-	last_depth = (int *)last_stack;
-	last_repeat = (int *)(last_stack + sizeof(int));
-	last_meth = (struct Method **)(last_stack + 2*sizeof(int));
+	last_stack = __setup_dvmstack(tls, &last_depth, &last_repeat, &last_meth);
+	if (!last_stack)
+		return 0;
 
 	if (*last_depth != dvm_bt->count) {
 		/* this is _not_ a repeated trace, save it for next time */
@@ -317,7 +335,7 @@ save_current_stack:
 	return ret;
 }
 
-static void print_dvm_sym(struct log_info *info, struct dvm_iface *dvm,
+static void print_dvm_sym(struct tls_info *tls, struct dvm_iface *dvm,
 			  int count, struct Method *m)
 {
 	struct bt_line_cache *cache = NULL;
@@ -331,7 +349,7 @@ static void print_dvm_sym(struct log_info *info, struct dvm_iface *dvm,
 		goto do_lookup;
 
 	if (cline->sym == (void *)m) {
-		__bt_printf(info, " :%d:%s", count, cline->str);
+		__bt_printf(tls, " :%d:%s", count, cline->str);
 		return;
 	}
 
@@ -342,33 +360,33 @@ do_lookup:
 	name = dvm->dvmHumanReadableMethod(m, DVM_BT_GET_SIGNATURE);
 	if (cline) {
 		libc.snprintf(cline->str, MAX_LINE_LEN, "%s:\n", name.c_str());
-		__bt_printf(info, " :%d:%s", count, cline->str);
+		__bt_printf(tls, " :%d:%s", count, cline->str);
 		return;
 	}
 
-	__bt_printf(info, " :%d:%s:\n", count, name.c_str());
+	__bt_printf(tls, " :%d:%s:\n", count, name.c_str());
 }
 
 extern "C"
-void print_dvm_bt(struct dvm_iface *dvm, struct dvm_bt *dvm_bt,
-		  struct log_info *info)
+void print_dvm_bt(struct tls_info *tls, struct dvm_iface *dvm,
+		  struct dvm_bt *dvm_bt)
 {
 	int ii;
 
-	ii = compare_traces(dvm, dvm_bt);
+	ii = compare_traces(tls, dvm, dvm_bt);
 	if (ii < 0) {
-		__bt_printf(info, "DVM:BT_REPEAT:1:\n");
+		__bt_printf(tls, "DVM:BT_REPEAT:1:\n");
 		return;
 	}
 	/* else if (ii > 1)
-		__bt_printf(info, "DVM:BT_REPEAT:%d:\n", ii);
+		__bt_printf(tls, "DVM:BT_REPEAT:%d:\n", ii);
 	*/
 
-	bt_printf(info, "DVM:BT_START:%d:\n", dvm_bt->count);
+	bt_printf(tls, "DVM:BT_START:%d:\n", dvm_bt->count);
 	for (ii = 0; ii < dvm_bt->count; ii++) {
-		print_dvm_sym(info, dvm, ii, dvm_bt->mlist[ii]);
+		print_dvm_sym(tls, dvm, ii, dvm_bt->mlist[ii]);
 	}
 
-	/* bt_printf(info, "DVM:BT_END:\n"); */
+	/* bt_printf(tls, "DVM:BT_END:\n"); */
 	return;
 }

@@ -7,4 +7,6 @@
  */
 #define WRAPPER_STACK_SZ (13 * 4)
 
+#define REG_LR_IDX 12
+
 #endif

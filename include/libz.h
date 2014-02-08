@@ -53,7 +53,7 @@ struct zlib_iface {
 	int (*gzwrite)(struct gzFile *file, void *buf, unsigned len);
 	int (*gzprintf)(struct gzFile *file, const char *format, ...);
 	int (*gzflush)(struct gzFile *file, int flush);
-	int (*gzclose_w)(struct gzFile *file);
+	int (*gzclose)(struct gzFile *file);
 };
 
 extern struct zlib_iface zlib;

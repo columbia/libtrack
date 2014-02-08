@@ -9,9 +9,9 @@
 #define WRAPPER_BACKTRACE_H
 
 #include "wrap_lib.h"
-#include <sys/cdefs.h>
+#include "wrap_tls.h"
 
-__BEGIN_DECLS
+//#define BT_DONT_WRITE_LOG
 
 #define MAX_BT_FRAMES 128
 #define MAX_LINE_LEN  256
@@ -34,9 +34,6 @@ struct bt_state {
 	struct dvm_bt *dvm_bt;
 	void *f;
 };
-
-extern void bt_free_log_buffer(int release_key);
-
 
 struct bt_line {
 	void     *sym;
@@ -71,7 +68,22 @@ struct bt_line_cache {
 
 
 extern struct bt_line *bt_cache_fetch(void *sym, struct bt_line_cache **cache_out);
-extern void bt_flush_cache(int release_key);
 
-__END_DECLS
+extern void log_backtrace(struct tls_info *tls);
+
+#define __bt_logpos(buf) \
+	((int *)(buf))
+
+#define __bt_logbuf(buf) \
+	((char *)((char *)(buf) + sizeof(int)))
+
+#define __bt_last_stack_depth(buf) \
+	((int *)((char *)(buf) + (sizeof(int)) + LOG_BUFFER_SIZE))
+
+#define __bt_last_stack_cnt(buf) \
+	((int *)((char *)(buf) + (2 * sizeof(int)) + LOG_BUFFER_SIZE))
+
+#define __bt_last_stack(buf) \
+	((void *)((char *)(buf) + (3 * sizeof(int)) + LOG_BUFFER_SIZE))
+
 #endif /* WRAPPER_BACKTRACE_H */

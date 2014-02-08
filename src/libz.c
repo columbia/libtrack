@@ -40,7 +40,7 @@ void init_zlib_iface(struct zlib_iface *zlib, const char *path)
 	init_sym(zlib, gzwrite);
 	init_sym(zlib, gzprintf);
 	init_sym(zlib, gzflush);
-	init_sym(zlib, gzclose_w);
+	init_sym(zlib, gzclose);
 
 #undef init_sym
 
@@ -61,9 +61,6 @@ void close_zlib_iface(struct zlib_iface *zlib)
 
 	dso = zlib->dso;
 	zlib->dso = NULL;
-
-	if (should_log())
-		libc_close_log();
 
 	libc.memset(zlib, 0, sizeof(*zlib));
 	dlclose(dso);
