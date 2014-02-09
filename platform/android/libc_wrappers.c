@@ -43,10 +43,10 @@ int handle_closefptr(struct tls_info *tls);
 int handle_rename_fd1(struct tls_info *tls);
 
 #define safe_call(INFO, ERR, CODE...) \
-	/* __put_libc(get_tls()); */ \
+	__put_libc(); \
 	CODE; \
 	ERR = *__errno(); \
-	/* __get_libc(get_tls(), (INFO)->symbol); */ \
+	__get_libc(get_tls(), (INFO)->symbol);
 
 /*
  * keep a table of valid file descriptors and their types
@@ -65,6 +65,7 @@ static inline int __maybe_grow_fdtable(int fd)
 		char *newtable = (char *)libc.malloc(newsz);
 		if (!newtable)
 			return -1;
+		libc_log("I:grow fdtable from %d to %d", fdtable_sz, newsz);
 		libc.memset(newtable, 0, newsz);
 		if (fdtable_sz) { /* copy over the old table */
 			libc.memcpy(newtable, fdtable, fdtable_sz);
@@ -197,10 +198,15 @@ void __hidden setup_wrap_cache(void)
 
 	/* setup all known functions we want to wrap */
 	add_entry("__fork", handle_fork, 1, 0);
+	add_entry("__bionic_clone", handle_fork, 1, 0);
+	add_entry("__sys_clone", handle_fork, 1, 0);
+	add_entry("__pthread_clone", handle_pthread, 1, 0);
 	add_entry("_exit", handle_exit, 1, 0);
 	add_entry("_exit_thread", handle_thread_exit, 1, 0);
 	add_entry("_exit_with_stack_teardown", handle_thread_exit, 1, 0);
 	add_entry("bsd_signal", handle_signal, 1, 0);
+	add_entry("clone", handle_fork, 1, 0);
+	add_entry("daemon", handle_fork, 1, 0);
 	add_entry("exit", handle_exit, 1, 0);
 	add_entry("exec", handle_exec, 1, 0);
 	add_entry("execl", handle_exec, 1, 0);
@@ -213,6 +219,7 @@ void __hidden setup_wrap_cache(void)
 	add_entry("pthread_exit", handle_thread_exit, 1, 0);
 	add_entry("sig_action", handle_sigaction, 1, 0);
 	add_entry("signal", handle_signal, 1, 0);
+	add_entry("system", handle_fork, 1, 0);
 	add_entry("sysv_signal", handle_signal, 1, 0);
 	add_entry("vfork", handle_fork, 1, 0);
 
@@ -338,7 +345,7 @@ int __hidden wrap_special(struct tls_info *tls)
 static void flush_and_close(struct tls_info *tls)
 {
 	if (tls->info.should_log) {
-		bt_printf(tls, "LOG:I:CLOSE:%s(0x%x,0x%x,0x%x,0x%x)\n",
+		bt_printf(tls, "LOG:I:CLOSE:%s(0x%x,0x%x,0x%x,0x%x):\n",
 			  tls->info.symbol,
 			  tls->info.regs[0], tls->info.regs[1],
 			  tls->info.regs[2], tls->info.regs[3]);
@@ -470,7 +477,7 @@ int handle_exec(struct tls_info *tls)
 		setup_exec_env();
 
 	if (info->should_log)
-		libc_log("I:%s:%s:", info->symbol, (const char *)info->regs[0]);
+		bt_printf(tls, "LOG:I:%s:%s:\n", info->symbol, (const char *)info->regs[0]);
 
 	close_dvm_iface(&dvm);
 	flush_and_close(tls);
@@ -658,6 +665,7 @@ static const char fd_types[] = {
 	'K', /* special kernel file (/sys or /proc) */
 	'k', /* special kernel file (/sys or /proc) */
 	'P', /* pipe */
+	'p', /* popen pipe */
 	'S', /* network socket */
 };
 
@@ -716,7 +724,7 @@ int handle_open(struct tls_info *tls)
 		char type = __get_path_type(path);
 		set_fdtype(rval, type);
 		if (info->should_log)
-			bt_printf(tls, "LOG:I:fd(%d,%s)='%c'\n", rval, path, type);
+			bt_printf(tls, "LOG:I:fd(%d,%s)='%c':\n", rval, path, type);
 	}
 
 	ret = get_retmem(NULL);
@@ -754,7 +762,7 @@ int handle_openat(struct tls_info *tls)
 		char type = __get_path_type(path);
 		set_fdtype(rval, type);
 		if (info->should_log)
-			bt_printf(tls, "LOG:I:fd(%d,%s)='%c'\n", rval, path, type);
+			bt_printf(tls, "LOG:I:fd(%d,%s)='%c':\n", rval, path, type);
 	}
 
 	ret = get_retmem(NULL);
@@ -793,7 +801,7 @@ int handle_fopen(struct tls_info *tls)
 		int fd = libc.fno(rval);
 		set_fdtype(fd, type);
 		if (info->should_log)
-			bt_printf(tls, "LOG:I:fd(%d,%s)='%c'\n", fd, path, type);
+			bt_printf(tls, "LOG:I:fd(%d,%s)='%c':\n", fd, path, type);
 	}
 
 	ret = get_retmem(NULL);
@@ -835,7 +843,7 @@ int handle_dup(struct tls_info *tls)
 	if (rval >= 0) {
 		set_fdtype(rval, type);
 		if (info->should_log)
-			bt_printf(tls, "LOG:I:fd(%d)='%c'\n", rval, type);
+			bt_printf(tls, "LOG:I:fd(%d)='%c':\n", rval, type);
 	}
 
 	ret = get_retmem(NULL);
@@ -870,7 +878,7 @@ int handle_socket(struct tls_info *tls)
 	if (rval >= 0) {
 		set_fdtype(rval, 'S');
 		if (info->should_log)
-			bt_printf(tls, "LOG:I:fd(%d)='S'\n", rval);
+			bt_printf(tls, "LOG:I:fd(%d)='S':\n", rval);
 	}
 
 	ret = get_retmem(NULL);
@@ -910,11 +918,16 @@ int handle_pipe(struct tls_info *tls)
 			set_fdtype(pfd[1], 'P');
 			if (info->should_log)
 				bt_printf(tls, "LOG:I:fd(%d)='P'"
-					        ":LOG:I:fd(%d)='P'\n",
+					        ":LOG:I:fd(%d)='P':\n",
 					  pfd[0], pfd[1]);
 		}
 	} else if (info->symbol[1] == 'o') {
 		FILE *f;
+
+		/* popen forks! */
+		close_dvm_iface(&dvm);
+		flush_and_close(tls);
+		libc.forking = libc.getpid();
 
 		safe_call(info, err,
 			  f = popenfunc((const char *)info->regs[0],
@@ -922,9 +935,9 @@ int handle_pipe(struct tls_info *tls)
 			 );
 		if (f) {
 			int fd = libc.fno(f);
-			set_fdtype(fd, 'P');
+			set_fdtype(fd, 'p');
 			if (info->should_log)
-				bt_printf(tls, "LOG:I:fd(%d,%s)='P'\n",
+				bt_printf(tls, "LOG:I:fd(%d,%s)='p':\n",
 					  fd, (const char *)info->regs[0]);
 		}
 		rval = (uint32_t)f;
@@ -964,7 +977,7 @@ int handle_accept(struct tls_info *tls)
 	if (rval >= 0) {
 		set_fdtype(rval, 'S');
 		if (info->should_log)
-			bt_printf(tls, "LOG:I:fd(%d)='S'\n", rval);
+			bt_printf(tls, "LOG:I:fd(%d)='S':\n", rval);
 	}
 
 	ret = get_retmem(NULL);

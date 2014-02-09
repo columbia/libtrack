@@ -133,10 +133,12 @@ my %_never_wrap = ( ".plt" => 1,
 		   "vscanf" => 1,
 		   "vsscanf" => 1,
 		   "__strcpy_chk" => 1,
+		   "__strncpy_chk" => 1,
 		   "__strlen_chk" => 1,
+		   "__strnlen_chk" => 1,
 		   "__strcpy_chk" => 1,
+		   "__strncpy_chk" => 1,
 		   "__strcat_chk" => 1,
-		   "__strlen_chk" => 1,
 
 		   # div
 		   "__aeabi_idiv" => 1,

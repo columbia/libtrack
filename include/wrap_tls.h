@@ -12,6 +12,7 @@
 #define TLS_MAX_STRING_LEN 256
 
 struct tls_info {
+	char logname[TLS_MAX_STRING_LEN];
 	void *logfile;
 
 	void *logbuffer;

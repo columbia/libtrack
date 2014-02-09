@@ -175,6 +175,7 @@ static int bt_setup_logbuffer(struct tls_info *tls, struct log_info *info)
 		 * hrm... not sure how this would happen, but we'll just reset
 		 * the values knowing that we probably lost some log data.
 		 */
+		bt_flush(tls, info);
 	}
 
 	info->log_pos = __bt_logpos(buf);
@@ -202,7 +203,7 @@ void __hidden tls_release_logbuffer(struct tls_info *tls)
 
 	pos = __bt_logpos(buf);
 	if (tls->logfile && *pos > 0) {
-		__bt_flush(tls->logfile, buf, pos);
+		__bt_flush(tls->logfile, __bt_logbuf(buf), pos);
 		log_flush(tls->logfile);
 	}
 

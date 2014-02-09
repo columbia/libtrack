@@ -267,7 +267,7 @@ static inline int should_log(void)
 
 extern volatile int*  __errno(void);
 
-#define LOG_BUFFER_SIZE (66 * 1024)
+#define LOG_BUFFER_SIZE (8 * 1024)
 
 struct log_info {
 	const char *symbol;
@@ -347,7 +347,7 @@ extern struct ret_ctx *get_retmem(struct tls_info *tls);
 		struct tls_info *tls = peek_tls(); \
 		if (!tls) \
 			break; \
-		if (zlib.valid && tls->logbuffer) { \
+		if (zlib.valid && tls->info.log_pos) { \
 			bt_printf(tls, fmt, ## __VA_ARGS__); \
 			bt_flush(tls, &(tls->info)); \
 		} else { \
@@ -359,7 +359,7 @@ extern struct ret_ctx *get_retmem(struct tls_info *tls);
 #define log_flush(f) \
 	if (f) { \
 		if (zlib.valid) \
-			zlib.gzflush((struct gzFile *)(f), Z_FULL_FLUSH); \
+			zlib.gzflush((struct gzFile *)(f), Z_SYNC_FLUSH); \
 		else \
 			libc.fflush((FILE *)f); \
 	}
@@ -410,7 +410,7 @@ extern struct ret_ctx *get_retmem(struct tls_info *tls);
 	do { \
 		int __len, __remain; \
 		int *__log_pos; \
-		if (!(____tls) || !(____tls)->info.log_pos) \
+		if (!(____tls) || !((____tls)->info.log_pos)) \
 			break; \
 		__log_pos = (____tls)->info.log_pos; \
 		__remain = LOG_BUFFER_SIZE - *__log_pos - sizeof(int) - 1; \
@@ -429,12 +429,14 @@ extern struct ret_ctx *get_retmem(struct tls_info *tls);
 				log_print((____tls)->logfile, LOG, "E:TRUNCATED!"); \
 				break; \
 			} \
+			(____tls)->info.log_buffer[*__log_pos] = 0; \
 			bt_flush(____tls, &(____tls)->info); \
-			continue; /* try again */ \
+			continue; \
 		} \
 		*__log_pos += __len; \
 		BT_EXTRA_FLUSH(____tls, &(____tls)->info); \
-	} while (0)
+		break; \
+	} while (1)
 
 #define bt_printf(__tls, fmt, ...) \
 	__bt_printf(__tls, "%lu.%lu:" fmt, \

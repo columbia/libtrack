@@ -20,8 +20,7 @@ extern void __lh_clear(void);
 /*
  * This function will be called after a fork(), from the child process
  */
-//static
-void tls_init_child(void)
+static void tls_init_child(int acquire)
 {
 	struct tls_info *tls;
 
@@ -33,14 +32,22 @@ void tls_init_child(void)
 	 * and re-start wrapper book keeping.
 	 */
 	tls = (struct tls_info *)libc.pthread_getspecific(s_wrap_tls_key);
-	if (tls)
+	if (tls) {
+		if (tls->should_cleanup) {
+			tls->should_cleanup = 0;
+			libc.__pthread_cleanup_pop(&tls->pth_cleanup, 0);
+		}
 		__free_tls(tls);
+	}
 
 	libc.pthread_key_delete(s_wrap_tls_key);
 	s_wrap_tls_key = (pthread_key_t)(-1);
 	libc.memset(&main_tls, 0, sizeof(main_tls));
 
 	__lh_clear();
+
+	if (!acquire)
+		return;
 
 	if (libc.pthread_key_create(&s_wrap_tls_key, NULL) != 0)
 		return;
@@ -54,24 +61,22 @@ void __hidden init_tls(void)
 			return;
 		libc.pthread_setspecific(s_wrap_tls_key, NULL);
 	}
-
-	/* the parent of a fork - no need to do anything */
-	if (!libc.forking || libc.forking == libc.getpid())
-	    return;
-
-	/* we forked and we're the child, so we need to do a bit of cleanup */
-	tls_init_child();
-	if (should_log()) {
-		void *f = get_log(0);
-		libc_log("I:FORKED");
-	}
 }
 
 static struct tls_info *__get_tls(int acquire, int reset)
 {
 	struct tls_info *tls = NULL;
+	int parent = 0;
+
+	if (libc.forking && libc.forking != libc.getpid()) {
+		/* we forked and we're the child, so we need to do a bit of cleanup */
+		tls_init_child(acquire);
+		libc.forking = 0;
+	}
 
 	if (s_wrap_tls_key == (pthread_key_t)(-1)) {
+		/* don't create pthread keys if we're not
+		 * supposed to allocate memory */
 		if (!acquire)
 			return NULL;
 		init_tls();

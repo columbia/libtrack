@@ -166,12 +166,12 @@ static void *table_dlsym(void *dso, const char *sym, int allow_null)
 	return (void *)((char *)wrapped_dli.dli_fbase + symbol->offset);
 }
 
-static inline FILE *__open_stdlogfile()
+static inline FILE *__open_stdlogfile(struct tls_info *tls)
 {
 	FILE *logf;
-	char buf[256];
+	char *buf = &(tls->logname[0]);
 	const char *nm = local_strrchr(progname, '/');
-	libc.snprintf(buf, sizeof(buf), "%s/%d.%d.%s.%s.log",
+	libc.snprintf(buf, sizeof(tls->logname), "%s/%d.%d.%s.%s.log",
 		      LOGFILE_PATH, libc.getpid(),
 		      libc.gettid(), _str(_IBNAM_),
 		      nm ? nm+1 : progname);
@@ -182,13 +182,13 @@ static inline FILE *__open_stdlogfile()
 	return logf;
 }
 
-static inline struct gzFile *__open_gzlogfile(void)
+static inline struct gzFile *__open_gzlogfile(struct tls_info *tls)
 {
 	FILE *logf;
 	struct gzFile *gzlogf;
-	char buf[256];
+	char *buf = &(tls->logname[0]);
 	const char *nm = local_strrchr(progname, '/');
-	libc.snprintf(buf, sizeof(buf), "%s/%d.%d.%s.%s.log.gz",
+	libc.snprintf(buf, sizeof(tls->logname), "%s/%d.%d.%s.%s.log.gz",
 		      LOGFILE_PATH, libc.getpid(),
 		      libc.gettid(), _str(_IBNAM_),
 		      nm ? nm+1 : progname);
@@ -229,14 +229,14 @@ static void ___open_log(struct tls_info *tls, int acquire_new, void **logf)
 	f = tls->logfile;
 	if (!f && acquire_new) {
 		if (zlib.valid) {
-			f = (void *)__open_gzlogfile();
+			f = (void *)__open_gzlogfile(tls);
 			if (!f) {
 				zlib.valid = 0;
-				f = (void *)__open_stdlogfile();
+				f = (void *)__open_stdlogfile(tls);
 				log_print(f, LOG, "E:Failed to open libz!");
 			}
 		} else
-			f = (void *)__open_stdlogfile();
+			f = (void *)__open_stdlogfile(tls);
 
 		tls->logfile = f;
 		log_print(f, LOG, "BEGIN(%s)", lh_sym(tls->lh));
@@ -303,7 +303,7 @@ void __hidden libc_close_log(void)
 {
 	struct tls_info *tls;
 
-	tls = get_tls();
+	tls = peek_tls();
 	if (!tls || !tls->logfile)
 		return;
 
@@ -496,7 +496,7 @@ void __hidden __put_libc(void)
  */
 int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 {
-	int did_wrap = 0, _err;
+	int did_wrap = 0, _err, parent;
 	struct tls_info *tls;
 
 	if (!regs || !stack || !symbol)
@@ -522,6 +522,7 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 	/* initialized once per process */
 	setup_wrap_cache();
 
+	parent = libc.forking;
 	tls = get_tls();
 	if (!tls)
 		return 0;
@@ -548,6 +549,8 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 		___open_log(tls, 1, &f);
 		if (!f)
 			goto out;
+		if (parent && parent != libc.getpid())
+			bt_printf(tls, "LOG:I:FORKED:parent=%d:", parent);
 		log_backtrace(tls);
 	} else if (tls->logfile) {
 		/*
