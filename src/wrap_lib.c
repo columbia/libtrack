@@ -225,6 +225,7 @@ static void ___open_log(struct tls_info *tls, int acquire_new, void **logf)
 
 	if (!zlib.dso)
 		init_zlib_iface(&zlib, ZLIB_DFLT_PATH);
+	zlib.valid = 0;
 
 	f = tls->logfile;
 	if (!f && acquire_new) {
