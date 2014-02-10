@@ -657,6 +657,7 @@ int __hidden init_libc_iface(struct libc_iface *iface, const char *dso_path)
 #ifdef ANDROID
 	init_sym(iface, 1, __pthread_cleanup_push,);
 	init_sym(iface, 1, __pthread_cleanup_pop,);
+	init_sym(iface, 1, readlink,);
 #endif
 
 	init_sym(iface, 0, pthread_mutex_lock,);

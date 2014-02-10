@@ -171,6 +171,7 @@ struct libc_iface {
 				       __pthread_cleanup_func_t func,
 				       void *arg);
 	void (*__pthread_cleanup_pop)(__pthread_cleanup_t *c, int execute);
+	ssize_t (*readlink)(const char *path, char *buf, size_t bufsize);
 #endif
 
 	int (*pthread_mutex_lock)(pthread_mutex_t *mutex);

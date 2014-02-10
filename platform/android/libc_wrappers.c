@@ -9,6 +9,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <sys/epoll.h>
+#include <sys/prctl.h>
 #include <sys/types.h>
 
 #include "backtrace.h"
@@ -28,6 +29,8 @@ static int handle_exit(struct tls_info *tls);
 static int handle_thread_exit(struct tls_info *tls);
 static int handle_exec(struct tls_info *tls);
 static int handle_fork(struct tls_info *tls);
+static int handle_prctl(struct tls_info *tls);
+static int handle_pth_setname(struct tls_info *tls);
 static int handle_pthread(struct tls_info *tls);
 static int handle_signal(struct tls_info *tls);
 static int handle_sigaction(struct tls_info *tls);
@@ -83,6 +86,63 @@ static inline int __maybe_grow_fdtable(int fd)
 	return 0;
 }
 
+static inline char __get_path_type(const char *path)
+{
+	char type = 'F'; /* default to standard file system type */
+
+	if (!path)
+		return '\0';
+	/*
+	 * Set the fd type based on the path the caller is trying to open.
+	 * /dev/ paths get their own type as to /proc and /sys
+	 */
+	if (local_strncmp("/dev/", path, 5) == 0) {
+		if (local_strncmp("/binder", path + 4, 7) == 0)
+			type = 'B';
+		else
+			type = 'D';
+	} else if (local_strncmp("/proc/", path, 6) == 0) {
+		type = 'K';
+	} else if (local_strncmp("/sys/", path, 5) == 0) {
+		type = 'k';
+	}
+
+	/*
+	 * TODO: theoretically, we should parse /proc/mounts here
+	 *       just in case the caller is accessing something on
+	 *       a network-mounted device, e.g., NFS
+	 */
+
+	return type;
+}
+
+static char __guess_fdtype(int fd)
+{
+	char path[32];
+	char buf[256];
+
+	/*
+	 * On Linux/Android we can use /proc/self/fd/X to make a reasonable
+	 * guess as to the origin of this FD
+	 */
+	libc.snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
+	if (libc.readlink(path, buf, sizeof(buf)) < 0)
+		return '?';
+
+	/* guess a type based on returned path */
+	if (buf[0] != '/') {
+		if (local_strncmp("pipe:", buf, 5) == 0)
+			return 'P';
+		if (local_strncmp("socket:", buf, 7) == 0)
+			return 'S';
+		if (local_strncmp("anon_inode:[eventpoll]", buf, 22) == 0)
+			return 'e';
+		return '?';
+	}
+
+	return __get_path_type(buf);
+}
+
 static inline char get_fdtype(int fd)
 {
 	char c = '\0';
@@ -94,9 +154,13 @@ static inline char get_fdtype(int fd)
 		goto out_unlock;
 
 	c = fdtable[fd];
-	if (!c &&
-	    (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO))
-		c = fdtable[fd] = 'f';
+	if (!c) {
+		if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO)
+			c = 'f';
+		else
+			c = __guess_fdtype(fd);
+		fdtable[fd] = c;
+	}
 
 out_unlock:
 	mtx_unlock(&fdtable_mutex);
@@ -222,8 +286,10 @@ void __hidden setup_wrap_cache(void)
 	add_entry("execve", handle_exec, 1, 0);
 	add_entry("execvp", handle_exec, 1, 0);
 	add_entry("fork", handle_fork, 1, 0);
+	add_entry("prctl", handle_prctl, 1, 0);
 	add_entry("pthread_create", handle_pthread, 1, 0);
 	add_entry("pthread_exit", handle_thread_exit, 1, 0);
+	add_entry("pthread_setname_np", handle_pth_setname, 1, 0);
 	add_entry("sig_action", handle_sigaction, 1, 0);
 	add_entry("signal", handle_signal, 1, 0);
 	add_entry("system", handle_fork, 1, 0);
@@ -382,6 +448,42 @@ int handle_fork(struct tls_info *tls)
 	libc.forking = libc.getpid();
 	return 0;
 }
+
+int handle_prctl(struct tls_info *tls)
+{
+	int cmd;
+	const char *name;
+
+	if (!tls->info.should_handle)
+		return 0;
+
+	cmd = (int)tls->info.regs[0];
+	name = (const char *)(tls->info.regs[1]);
+
+	if (cmd != PR_SET_NAME)
+		return 0;
+
+	/* close this log file and open a new one with the new name! */
+	if (tls->info.should_log)
+		bt_printf(tls, "LOG:I:name=%s\n", name);
+	return 0;
+}
+
+int handle_pth_setname(struct tls_info *tls)
+{
+	const char *name;
+
+	if (!tls->info.should_handle)
+		return 0;
+
+	name = (const char *)(tls->info.regs[1]);
+
+	/* close this log file and open a new one with the new name! */
+	if (tls->info.should_log)
+		bt_printf(tls, "LOG:I:name=%s\n", name);
+	return 0;
+}
+
 
 static const char *wrap_ld_preload(const char *old_val)
 {
@@ -672,6 +774,7 @@ int handle_sigaction(struct tls_info *tls)
 }
 
 static const char fd_types[] = {
+	'B', /* /dev/binder */
 	'D', /* device files (/dev) */
 	'E', /* epoll FD */
 	'F', /* regular file / directory */
@@ -682,32 +785,6 @@ static const char fd_types[] = {
 	'p', /* popen pipe */
 	'S', /* network socket */
 };
-
-static inline char __get_path_type(const char *path)
-{
-	char type = 'F'; /* default to standard file system type */
-
-	if (!path)
-		return '\0';
-	/*
-	 * Set the fd type based on the path the caller is trying to open.
-	 * /dev/ paths get their own type as to /proc and /sys
-	 */
-	if (local_strncmp("/dev/", path, 5) == 0)
-		type = 'D';
-	else if (local_strncmp("/proc/", path, 6) == 0)
-		type = 'K';
-	else if (local_strncmp("/sys/", path, 5) == 0)
-		type = 'k';
-
-	/*
-	 * TODO: theoretically, we should parse /proc/mounts here
-	 *       just in case the caller is accessing something on
-	 *       a network-mounted device, e.g., NFS
-	 */
-
-	return type;
-}
 
 int handle_open(struct tls_info *tls)
 {
