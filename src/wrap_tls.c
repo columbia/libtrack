@@ -97,17 +97,18 @@ static struct tls_info *__get_tls(int acquire, int reset)
 	if (!acquire)
 		goto out;
 
-	if (is_main())
+	if (is_main()) {
 		tls = &main_tls;
-	else
+		libc.memset(tls, 0, sizeof(*tls));
+	} else {
 		tls = (struct tls_info *)libc.malloc(sizeof(*tls));
+		libc.memset(tls, 0, sizeof(*tls));
+		libc.__pthread_cleanup_push(&tls->pth_cleanup, thread_tls_cleanup, tls);
+		tls->should_cleanup = 1;
+	}
+
 	if (!tls)
 		goto out;
-
-	libc.memset(tls, 0, sizeof(*tls));
-
-	libc.__pthread_cleanup_push(&tls->pth_cleanup, thread_tls_cleanup, tls);
-	tls->should_cleanup = 1;
 
 	/*
 	 * This signal handler will flush logs!
@@ -139,8 +140,6 @@ static void __free_tls(struct tls_info *tls)
 		return;
 
 	/* clear out this thread's TLS values */
-	if (should_log())
-		bt_printf(tls, "D:CLEARING TLS\n");
 	tls_release_dvmstack(tls);
 	tls_release_btcache(tls);
 	tls_release_logbuffer(tls);
