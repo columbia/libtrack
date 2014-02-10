@@ -53,8 +53,8 @@ static int handle_epoll(struct tls_info *tls);
 	__clear_wrapping(); \
 	CODE; \
 	ERR = *__errno(); \
-	if (__set_wrapping()) \
-		__get_libc(get_tls(), (INFO)->symbol);
+	__set_wrapping(); \
+	__get_libc(get_tls(), (INFO)->symbol);
 
 /*
  * keep a table of valid file descriptors and their types

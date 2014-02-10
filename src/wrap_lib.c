@@ -121,13 +121,13 @@ static Dl_info dl_dli;
 /*
  * Is the given address within the TEXT section of our wrapped library?
  */
-static int is_in_wrapped_text(unsigned long addr, const char *sym)
+static int is_in_wrapped_text(unsigned long addr)
 {
 	unsigned long start, end;
 
 	start = (unsigned long)wrapped_dli.dli_fbase;
 	end = start + (unsigned long)wrapped_text_size;
-	if (addr >= start && addr < end)
+	if (start && addr >= start && addr < end)
 		return 1;
 
 	return 0;
@@ -214,7 +214,7 @@ static void ___open_log(struct tls_info *tls, int acquire_new, void **logf)
 	if (logf)
 		*logf = NULL;
 
-	if (!tls || libc.dso == (void *)1)
+	if (!tls)
 		return;
 	if (!libc.dso) {
 		if (init_libc_iface(&libc, LIBC_PATH) < 0)
@@ -445,8 +445,10 @@ int __hidden __set_wrapping(void)
 		libc.pthread_key_create(&s_wrapping_key, NULL);
 		libc.pthread_setspecific(s_wrapping_key, NULL);
 	}
-	if (libc.pthread_getspecific(s_wrapping_key)) \
+
+	if (libc.pthread_getspecific(s_wrapping_key) != NULL)
 		return 0;
+
 	libc.pthread_setspecific(s_wrapping_key, (void *)1);
 	return 1;
 }
@@ -459,6 +461,7 @@ void __hidden __clear_wrapping(void)
 
 int __hidden __get_libc(struct tls_info *tls, const char *symbol)
 {
+#ifdef LIBC_LOCK_DEBUGGING
 	int i;
 	trace_ptr_t lh;
 
@@ -470,7 +473,6 @@ int __hidden __get_libc(struct tls_info *tls, const char *symbol)
 	if (lh_valid(lh))
 		return 0;
 
-#ifdef LIBC_LOCK_DEBUGGING
 	lh = __lh_lookup(libc.gettid());
 	if (lh_valid(lh)) {
 		void *f = get_log(0);
@@ -481,18 +483,20 @@ int __hidden __get_libc(struct tls_info *tls, const char *symbol)
 		tls->lh = lh;
 		return 0;
 	}
-#endif
 
 	/* acquire a lock_holder structure and add to the list */
 	lh = lh_new(symbol, 0);
 	tls->lh = lh;
 
-#ifdef LIBC_LOCK_DEBUGGING
 	mtx_lock(&libc_mutex);
 	lh_add(lh);
 	mtx_unlock(&libc_mutex);
-#endif
 
+#else
+	if (!tls)
+		return 0;
+	tls->lh = lh_new(symbol, 0);
+#endif
 	return 1;
 }
 
@@ -517,22 +521,18 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 	if (!regs || !stack || !symbol)
 		return 0;
 
-	/* a libc function was called during libc init (probably from dlopen) */
-	if (libc.dso == (void *)1)
-		return 0;
-
-	/*
-	 * don't trace anything that originates from the wrapped library:
-	 * this is an implementation detail, and we don't want it.
-	 */
-	if (is_in_wrapped_text(((uint32_t *)regs)[REG_LR_IDX], symbol))
-		return 0;
-
 	_err = *__errno();
 	if (!libc.dso) {
 		if (init_libc_iface(&libc, LIBC_PATH) < 0)
 			BUG(0x31);
 	}
+
+	/*
+	 * don't trace anything that originates from the wrapped library:
+	 * this is an implementation detail, and we don't want it.
+	 */
+	if (is_in_wrapped_text(((uint32_t *)regs)[REG_LR_IDX]))
+		return 0;
 
 	/* we're already tracing - disable recursion */
 	if (!__set_wrapping())
@@ -541,12 +541,10 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 	parent = libc.forking;
 	tls = get_tls();
 	if (!tls)
-		return 0;
+		goto out_clear;
 
-	if (!__get_libc(tls, symbol)) {
-		(*__errno()) = _err;
-		return 0;
-	}
+	if (!__get_libc(tls, symbol))
+		goto out_clear;
 
 	/* initialized once per process */
 	setup_wrap_cache();
@@ -587,6 +585,8 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 
 out:
 	__put_libc();
+
+out_clear:
 	__clear_wrapping();
 
 	/*
@@ -602,7 +602,6 @@ out:
 int __hidden init_libc_iface(struct libc_iface *iface, const char *dso_path)
 {
 	if (!iface->dso) {
-		iface->dso = (void *)1; /* in case dlopen needs any libc symbols */
 		iface->dso = dlopen(dso_path, RTLD_NOW | RTLD_LOCAL);
 		if (!iface->dso)
 			_BUG(0x40);
