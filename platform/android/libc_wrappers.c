@@ -8,6 +8,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <unistd.h>
+#include <sys/epoll.h>
 #include <sys/types.h>
 
 #include "backtrace.h"
@@ -42,6 +43,7 @@ static int handle_closefd(struct tls_info *tls);
 static int handle_closefptr(struct tls_info *tls);
 
 static int handle_rename_fd1(struct tls_info *tls);
+static int handle_epoll(struct tls_info *tls);
 
 #define safe_call(INFO, ERR, CODE...) \
 	__put_libc(); \
@@ -239,6 +241,8 @@ void __hidden setup_wrap_cache(void)
 	add_entry("close", handle_closefd, 1, 1);
 	add_entry("dup", handle_dup, 1, 0);
 	add_entry("dup2", handle_dup, 1, 0);
+	add_entry("epoll_create", handle_epoll, 1, 0);
+	add_entry("epoll_ctl", handle_epoll, 1, 0);
 	add_entry("fclose", handle_closefptr, 1, 1);
 	add_entry("fopen", handle_fopen, 1, 0);
 	add_entry("freopen", handle_fopen, 1, 0);
@@ -252,6 +256,7 @@ void __hidden setup_wrap_cache(void)
 	add_entry("socketpair", handle_socket, 1, 0);
 
 	/* setup functions we want to dynamically rename in the BT */
+	add_entry("epoll_wait", handle_epoll, 0, 1);
 	add_entry("read", handle_rename_fd1, 0, 1);
 	add_entry("readv", handle_rename_fd1, 0, 1);
 	add_entry("pread", handle_rename_fd1, 0, 1);
@@ -1107,4 +1112,259 @@ int handle_rename_fd1(struct tls_info *tls)
 	info->symbol = (const char *)ret->symmod;
 
 	return 0;
+}
+
+
+/*****
+ *
+ * epoll handling
+ *
+ */
+#define MAX_EPOLL_FDS 100
+static struct epoll_fd_set {
+	int fds[MAX_EPOLL_FDS];
+} *s_epfds = NULL;
+int s_epfds_sz = 0;
+
+static pthread_mutex_t epfds_mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
+
+static inline int __maybe_grow_epfds(int fd)
+{
+	if (!s_epfds_sz|| fd > s_epfds_sz) {
+		int i, j;
+		int newsz = fd < (MIN_FDTABLE_SZ/2) ? MIN_FDTABLE_SZ : fd * 2;
+		struct epoll_fd_set *newtable;
+		newtable = (struct epoll_fd_set *)libc.malloc(newsz * sizeof(*newtable));
+		if (!newtable)
+			return -1;
+		/* set all fds to -1 initially */
+		for (i = 0; i < newsz; i++) {
+			for (j = 0; j < MAX_EPOLL_FDS; j++)
+				newtable[i].fds[j] = -1;
+		}
+		if (s_epfds_sz) { /* copy over the old table */
+			libc.memcpy(newtable, s_epfds, s_epfds_sz * sizeof(*newtable));
+			if (s_epfds)
+				libc.free(s_epfds);
+		}
+		s_epfds_sz = newsz;
+		s_epfds = (struct epoll_fd_set *)newtable;
+	}
+	return 0;
+}
+
+
+/* caller should hold epfds_mutex */
+static struct epoll_fd_set* get_epfds(int epfd)
+{
+	if (__maybe_grow_epfds(epfd) < 0)
+		return NULL;
+	return &s_epfds[epfd];
+}
+
+static void add_epfd(int epfd, int fd)
+{
+	struct epoll_fd_set *epfds;
+	int i;
+
+	if (fd < 0 || epfd < 0)
+		return;
+
+	mtx_lock(&epfds_mutex);
+	epfds = get_epfds(epfd);
+	if (!epfds) {
+		mtx_unlock(&epfds_mutex);
+		return;
+	}
+
+	for (i = 0; i < MAX_EPOLL_FDS; i++) {
+		if (epfds->fds[i] < 0) {
+			epfds->fds[i] = fd;
+			break;
+		}
+		if (epfds->fds[i] == fd)
+			break; /* it's alredy there?! */
+	}
+	mtx_unlock(&epfds_mutex);
+}
+
+static void del_epfd(int epfd, int fd)
+{
+	struct epoll_fd_set *epfds;
+	int i;
+
+	if (fd < 0 || epfd < 0)
+		return;
+
+	mtx_lock(&epfds_mutex);
+	epfds = get_epfds(epfd);
+	if (!epfds) {
+		mtx_unlock(&epfds_mutex);
+		return;
+	}
+
+	for (i = 0; i < MAX_EPOLL_FDS; i++) {
+		if (epfds->fds[i] == fd) {
+			epfds->fds[i] = -1;
+			break;
+		}
+	}
+	/* compact */
+	for ( ; i < MAX_EPOLL_FDS - 1; i++) {
+		if (epfds->fds[i+1] < 0)
+			break;
+		epfds->fds[i] = epfds->fds[i+1];
+		epfds->fds[i+1] = -1;
+	}
+	mtx_unlock(&epfds_mutex);
+}
+
+static int __epoll_modsym(struct tls_info *tls)
+{
+	int rval, i, j;
+	char *symptr, *symend;
+	struct log_info *info = &tls->info;
+	struct epoll_fd_set *epfds;
+	char fdt[MAX_EPOLL_FDS];
+
+	struct ret_ctx *ret;
+
+	/* only rename epoll_wait */
+	if (strncmp("wait", info->symbol + 6, 4) != 0)
+		return 0;
+
+	/* TODO: modify epoll_wait name based on consituent FDs */
+	mtx_lock(&epfds_mutex);
+	epfds = get_epfds((int)info->regs[0]);
+	if (!epfds) {
+		mtx_unlock(&epfds_mutex);
+		return 0;
+	}
+
+	libc.memset(&fdt, 0, MAX_EPOLL_FDS);
+	for (i = 0; i < MAX_EPOLL_FDS; i++) {
+		if (epfds->fds[i] < 0)
+			break;
+		fdt[i] = get_fdtype(epfds->fds[i]);
+		if (!fdt[i])
+			fdt[i] = '?';
+	}
+	mtx_unlock(&epfds_mutex);
+
+	ret = get_retmem(tls);
+	if (!ret)
+		return 0;
+
+	symptr = ret->symmod;
+	symend = symptr + MAX_SYMBOL_LEN - 1;
+	symptr += libc.snprintf(symptr, MAX_SYMBOL_LEN, "%s_", info->symbol);
+
+	/* sort the file types using fd_types array */
+	for (i = 0; i < (int)sizeof(fd_types); i++) {
+		for (j = 0; j < MAX_EPOLL_FDS; j++) {
+			if (fdt[j] == fd_types[i]) {
+				*symptr++ = fdt[j];
+				fdt[j] = 0;
+				if (symptr > symend)
+					break;
+			}
+		}
+		if (symptr > symend)
+			break;
+	}
+
+	/* output any unknown fd types at the end */
+	for (j = 0; j < MAX_EPOLL_FDS; j++) {
+		if (fdt[j]) {
+			*symptr++ = fdt[j];
+			if (symptr > symend)
+				break;
+		}
+	}
+	*symptr = 0;
+
+	info->symbol = (const char *)ret->symmod;
+
+	return 0;
+}
+
+
+static int __handle_epoll_create(struct tls_info *tls)
+{
+	int epfd, err;
+	struct ret_ctx *ret;
+	struct log_info *info = &tls->info;
+	int (*createfunc)(int);
+	/*
+	 * handles:
+	 * int epoll_create(int size);
+	 */
+	createfunc = info->func;
+
+	safe_call(info, err, epfd = createfunc((int)info->regs[0]));
+	if (epfd >= 0) {
+		set_fdtype(epfd, 'E');
+		if (info->should_log)
+			bt_printf(tls, "LOG:I:fd(%d)='E':\n", epfd);
+	}
+	ret = get_retmem(NULL);
+	if (!ret)
+		BUG_MSG(0x4319, "No TLS return value!");
+	ret->sym = info->symbol;
+	ret->_errno = err;
+	ret->u.u32[0] = epfd;
+	return 1;
+}
+
+static int __handle_epoll_ctl(struct tls_info *tls)
+{
+	int epfd, fd, op;
+	struct log_info *info = &tls->info;
+
+	epfd = (int)info->regs[0];
+	op = (int)info->regs[1];
+	fd = (int)info->regs[2];
+
+	if (info->should_log)
+		bt_printf(tls, "LOG:I:%s fd(%d)='%c' %s epfd=%d:\n",
+			  op == EPOLL_CTL_ADD ? "adding" :
+			    (op == EPOLL_CTL_DEL ? "deleting" : "??"),
+			  fd,
+			  get_fdtype(fd),
+			  op == EPOLL_CTL_ADD ? "to" :
+			    (op == EPOLL_CTL_DEL ? "from" : "??"),
+			  epfd);
+	if (op == EPOLL_CTL_ADD)
+		add_epfd(epfd, fd);
+	else if (op == EPOLL_CTL_DEL)
+		del_epfd(epfd, fd);
+
+	return 0;
+}
+
+int handle_epoll(struct tls_info *tls)
+{
+	struct log_info *info;
+
+	if (!tls)
+		return 0;
+
+	info = &tls->info;
+
+	if (info->should_mod_sym)
+		return __epoll_modsym(tls);
+
+	if (!info->should_handle)
+		return 0;
+
+	/*
+	 * we're to handle one of these functions,
+	 * right now it's epoll_create and epoll_ctl
+	 */
+	if (strncmp("ctl", info->symbol + 6, 3) == 0)
+		return __handle_epoll_ctl(tls);
+	else if (strncmp("create", info->symbol + 6, 6) == 0)
+		return __handle_epoll_create(tls);
+	else
+		return 0;
 }
