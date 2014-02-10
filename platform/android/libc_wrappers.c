@@ -23,25 +23,25 @@ extern struct dvm_iface dvm;
 
 typedef int (*handler_func)(struct tls_info *tls);
 
-int handle_exit(struct tls_info *tls);
-int handle_thread_exit(struct tls_info *tls);
-int handle_exec(struct tls_info *tls);
-int handle_fork(struct tls_info *tls);
-int handle_pthread(struct tls_info *tls);
-int handle_signal(struct tls_info *tls);
-int handle_sigaction(struct tls_info *tls);
+static int handle_exit(struct tls_info *tls);
+static int handle_thread_exit(struct tls_info *tls);
+static int handle_exec(struct tls_info *tls);
+static int handle_fork(struct tls_info *tls);
+static int handle_pthread(struct tls_info *tls);
+static int handle_signal(struct tls_info *tls);
+static int handle_sigaction(struct tls_info *tls);
 
-int handle_dup(struct tls_info *tls);
-int handle_open(struct tls_info *tls);
-int handle_openat(struct tls_info *tls);
-int handle_fopen(struct tls_info *tls);
-int handle_socket(struct tls_info *tls);
-int handle_pipe(struct tls_info *tls);
-int handle_accept(struct tls_info *tls);
-int handle_closefd(struct tls_info *tls);
-int handle_closefptr(struct tls_info *tls);
+static int handle_dup(struct tls_info *tls);
+static int handle_open(struct tls_info *tls);
+static int handle_openat(struct tls_info *tls);
+static int handle_fopen(struct tls_info *tls);
+static int handle_socket(struct tls_info *tls);
+static int handle_pipe(struct tls_info *tls);
+static int handle_accept(struct tls_info *tls);
+static int handle_closefd(struct tls_info *tls);
+static int handle_closefptr(struct tls_info *tls);
 
-int handle_rename_fd1(struct tls_info *tls);
+static int handle_rename_fd1(struct tls_info *tls);
 
 #define safe_call(INFO, ERR, CODE...) \
 	__put_libc(); \
@@ -737,6 +737,8 @@ int handle_open(struct tls_info *tls)
 	}
 
 	ret = get_retmem(NULL);
+	if (!ret)
+		BUG_MSG(0x4312, "No TLS return value!");
 	ret->sym = info->symbol;
 	ret->_errno = err;
 	ret->u.u32[0] = rval;
@@ -775,6 +777,8 @@ int handle_openat(struct tls_info *tls)
 	}
 
 	ret = get_retmem(NULL);
+	if (!ret)
+		BUG_MSG(0x4313, "No TLS return value!");
 	ret->sym = info->symbol;
 	ret->_errno = err;
 	ret->u.u32[0] = rval;
@@ -814,6 +818,8 @@ int handle_fopen(struct tls_info *tls)
 	}
 
 	ret = get_retmem(NULL);
+	if (!ret)
+		BUG_MSG(0x4314, "No TLS return value!");
 	ret->sym = info->symbol;
 	ret->_errno = err;
 	ret->u.u32[0] = (uint32_t)rval;
@@ -857,6 +863,8 @@ int handle_dup(struct tls_info *tls)
 	}
 
 	ret = get_retmem(NULL);
+	if (!ret)
+		BUG_MSG(0x4315, "No TLS return value!");
 	ret->sym = info->symbol;
 	ret->_errno = err;
 	ret->u.u32[0] = rval;
@@ -892,6 +900,8 @@ int handle_socket(struct tls_info *tls)
 	}
 
 	ret = get_retmem(NULL);
+	if (!ret)
+		BUG_MSG(0x4316, "No TLS return value!");
 	ret->sym = info->symbol;
 	ret->_errno = err;
 	ret->u.u32[0] = rval;
@@ -956,6 +966,8 @@ int handle_pipe(struct tls_info *tls)
 	}
 
 	ret = get_retmem(NULL);
+	if (!ret)
+		BUG_MSG(0x4317, "No TLS return value!");
 	ret->sym = info->symbol;
 	ret->_errno = err;
 	ret->u.u32[0] = rval;
@@ -990,6 +1002,8 @@ int handle_accept(struct tls_info *tls)
 	}
 
 	ret = get_retmem(NULL);
+	if (!ret)
+		BUG_MSG(0x4318, "No TLS return value!");
 	ret->sym = info->symbol;
 	ret->_errno = err;
 	ret->u.u32[0] = rval;
@@ -1057,7 +1071,10 @@ int handle_rename_fd1(struct tls_info *tls)
 	fd = (int)info->regs[0];
 	type = get_fdtype(fd);
 
-	ret = get_retmem(NULL);
+	ret = get_retmem(tls);
+	if (!ret)
+		return 0;
+
 	libc.snprintf(ret->symmod, MAX_SYMBOL_LEN, "%s_%c",
 		      info->symbol, type ? type : '?');
 	info->symbol = (const char *)ret->symmod;
