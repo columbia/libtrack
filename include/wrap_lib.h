@@ -11,8 +11,6 @@
  */
 //#define AGGRESIVE_FLUSHING
 
-//#define LIBC_DEBUG_LOCKING
-
 #include <dlfcn.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -80,68 +78,6 @@ typedef struct _Unwind_Context __unwind_context;
 typedef _Unwind_Context __unwind_context;
 #endif
 typedef _Unwind_Reason_Code (*bt_func)(__unwind_context* context, void* arg);
-
-#ifdef LIBC_DEBUG_LOCKING
-#define MAX_TRACE_THREADS 512
-#define LOCK_TRACE_MAGIC  0xf00d4311
-typedef struct lock_holder {
-	uint32_t magic;
-	struct lock_holder *next;
-	struct lock_holder *prev;
-	uint32_t tid;
-	const char *sym;
-	int refcnt;
-} *trace_ptr_t;
-
-#define lh_valid(lh) \
-	(lh != NULL && (lh)->magic == (uint32_t)LOCK_TRACE_MAGIC)
-
-#define lh_new(sym, fastlookup) \
-	__lh_new(sym, fastlookup)
-
-#define lh_free(lh) \
-	__lh_free(lh)
-
-#define lh_sym(lh) \
-	((lh) ? (lh)->sym : (const char *)NULL)
-
-#define lh_tid(lh) \
-	((lh) ? (lh)->tid : (uint32_t)(-1))
-
-#define lh_add(__lh) \
-	if ((__lh) != NULL) { \
-		libc.lh.prev->next = __lh; \
-		(__lh)->prev = libc.lh.prev; \
-		(__lh)->next = &(libc.lh); \
-		libc.lh.prev = __lh; \
-	}
-
-#define lh_del(lh) \
-	if ((lh) != NULL) { \
-		if ((lh)->prev != (lh)) \
-			(lh)->prev->next = (lh)->next; \
-		if ((lh)->next != (lh)) \
-			(lh)->next->prev = (lh)->prev; \
-	}
-
-#define lh_empty(lh) \
-	(!(lh) || (lh)->prev == (lh) && (lh)->next == (lh))
-
-#define lh_foreach(__lh) \
-	for (__lh = libc.lh.next; (__lh) != &(libc.lh); __lh = (__lh)->next)
-
-#else
-typedef const char * trace_ptr_t;
-#define lh_valid(lh)  (lh != NULL)
-#define lh_new(sym,x) (trace_ptr_t)(sym)
-#define lh_free(lh)   ((void)(lh))
-#define lh_sym(lh)    ((const char *)(lh))
-#define lh_tid(lh)    (libc.gettid())
-#define lh_add(x)
-#define lh_del(x)
-#define lh_empty(x) 0
-#define lh_foreach(x) while (0)
-#endif /* LIBC_DEBUG_LOCKING */
 
 struct libc_iface {
 	void *dso;
@@ -214,10 +150,6 @@ struct libc_iface {
 					      void *valuep);
 #endif
 	uintptr_t (*_Unwind_Backtrace)(bt_func func, void *arg);
-
-#ifdef LIBC_DEBUG_LOCKING
-	struct lock_holder lh;
-#endif
 };
 
 extern struct libc_iface libc;

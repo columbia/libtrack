@@ -49,12 +49,10 @@ static int handle_rename_fd1(struct tls_info *tls);
 static int handle_epoll(struct tls_info *tls);
 
 #define safe_call(INFO, ERR, CODE...) \
-	__put_libc(); \
 	__clear_wrapping(); \
 	CODE; \
 	ERR = *__errno(); \
-	__set_wrapping(); \
-	__get_libc(get_tls(), (INFO)->symbol);
+	__set_wrapping()
 
 /*
  * keep a table of valid file descriptors and their types
@@ -402,7 +400,7 @@ int __hidden wrap_special(struct tls_info *tls)
 {
 	struct wrap_cache_entry *e;
 
-	if (!tls->info.symbol)
+	if (!wsym(tls))
 		return 0;
 
 	e = get_cached_sym(&tls->info);
@@ -422,7 +420,7 @@ static void flush_and_close(struct tls_info *tls)
 {
 	if (tls->info.should_log) {
 		bt_printf(tls, "LOG:I:CLOSE:%s(0x%x,0x%x,0x%x,0x%x):\n",
-			  tls->info.symbol,
+			  wsym(tls),
 			  tls->info.regs[0], tls->info.regs[1],
 			  tls->info.regs[2], tls->info.regs[3]);
 		bt_flush(tls, &tls->info);

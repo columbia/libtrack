@@ -68,10 +68,6 @@ local_strncmp(const char *s1, const char *s2, size_t n)
 
 struct libc_iface libc __hidden;
 
-#ifdef LIBC_DEBUG_LOCKING
-static pthread_mutex_t libc_mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
-#endif
-
 /*
  * Symbol table / information
  *
@@ -237,7 +233,7 @@ static void ___open_log(struct tls_info *tls, int acquire_new, void **logf)
 			f = (void *)__open_stdlogfile(tls);
 
 		tls->logfile = f;
-		log_print(f, LOG, "BEGIN(%s)", lh_sym(tls->lh));
+		log_print(f, LOG, "BEGIN(%s)", wsym(tls));
 		log_flush(f);
 	}
 
@@ -292,7 +288,7 @@ void __hidden tls_release_logfile(struct tls_info *tls)
 	tls->logfile = NULL;
 
 
-	log_print(f, LOG, "END(%s)", lh_sym(tls->lh));
+	log_print(f, LOG, "END(%s)", wsym(tls));
 	log_flush(f);
 	log_close(f);
 }
@@ -337,106 +333,6 @@ void *wrapped_dlsym(const char *libpath, void **lib_handle, const char *symbol)
 	return sym;
 }
 
-#ifdef LIBC_DEBUG_LOCKING
-static pthread_mutex_t th_mtx = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
-static struct lock_holder s_th_array[MAX_TRACE_THREADS];
-
-void __hidden __lh_clear(void)
-{
-	mtx_lock(&th_mtx);
-	libc.memset(s_th_array, 0, sizeof(s_th_array));
-	mtx_unlock(&th_mtx);
-}
-
-static inline struct lock_holder *__lh_lookup(int tid)
-{
-	int i;
-	for (i = 0; i < MAX_TRACE_THREADS; i++) {
-		if (lh_valid(&s_th_array[i]) && (int)s_th_array[i].tid == tid) {
-			s_th_array[i].refcnt += 1;
-			if (s_th_array[i].refcnt > 1) {
-				libc_log("W:LIBC:sym(\"%s\") has recursively called libc from \"%s\" (refcnt=%d)",
-					 symbol, s_th_array[i].sym, s_th_array[i].refcnt);
-			}
-			return &s_th_array[i]; /* alreay have one! */
-		}
-	}
-	return NULL;
-}
-
-static inline struct lock_holder *__lh_new(const char *symbol, int fastlookup)
-{
-	int i, tid;
-	struct lock_holder *lh;
-
-	tid = libc.gettid();
-	if (fastlookup) {
-		lh = __lh_lookup(tid);
-		if (lh)
-			return lh;
-	}
-
-	mtx_lock(&th_mtx);
-	for (i = 0; i < MAX_TRACE_THREADS; i++) {
-		if (!lh_valid(&s_th_array[i])) {
-			s_th_array[i].magic = LOCK_TRACE_MAGIC;
-			s_th_array[i].next = s_th_array[i].prev = &s_th_array[i];
-			s_th_array[i].tid = tid;
-			s_th_array[i].sym = symbol;
-			s_th_array[i].refcnt = 1;
-			mtx_unlock(&th_mtx);
-			return &s_th_array[i];
-		}
-	}
-	mtx_unlock(&th_mtx);
-
-	return NULL;
-}
-
-static void __lh_free(struct lock_holder *lh)
-{
-	if (!lh_valid(lh)) {
-		void *f = get_log(0);
-		libc_log("E:LIBC:Invalid lock_holder @%p!", lh);
-		log_flush(f);
-		return;
-	}
-
-	if (--(lh->refcnt) != 0) {
-		void *f = get_log(0);
-		libc_log("W:LIBC:someone still holding sym(\"%s\") lock, refcnt=%d",
-			 lh->sym, lh->refcnt);
-		log_flush(f);
-	}
-}
-#else
-void __hidden __lh_clear(void)
-{
-}
-#endif /* LIBC_LOCK_DEBUGGING */
-
-void __hidden tls_release_lh(struct tls_info *tls)
-{
-	trace_ptr_t lh;
-
-	if (!tls)
-		return;
-	
-	lh = tls->lh;
-	if (!lh_valid(lh))
-		return;
-
-	tls->lh = NULL;
-
-#ifdef LIBC_LOCK_DEBUGGING
-	mtx_lock(&libc_mutex);
-	lh_del(lh);
-	mtx_unlock(&libc_mutex);
-#endif
-
-	lh_free(lh);
-}
-
 static pthread_key_t s_wrapping_key = (pthread_key_t)(-1);
 
 int __hidden __set_wrapping(void)
@@ -456,53 +352,6 @@ int __hidden __set_wrapping(void)
 void __hidden __clear_wrapping(void)
 {
 	libc.pthread_setspecific(s_wrapping_key, NULL);
-}
-
-
-int __hidden __get_libc(struct tls_info *tls, const char *symbol)
-{
-#ifdef LIBC_LOCK_DEBUGGING
-	int i;
-	trace_ptr_t lh;
-
-	if (!tls)
-		return 0;
-
-	lh = tls->lh;
-
-	if (lh_valid(lh))
-		return 0;
-
-	lh = __lh_lookup(libc.gettid());
-	if (lh_valid(lh)) {
-		void *f = get_log(0);
-		libc_log("D:LIBC:(\"%s\") already held by \"%s\" (%d), how did we get here?!",
-			 symbol,
-			 lh_valid(lh) ? lh_sym(lh) : "<invalid>",
-			 lh_valid(lh) ? lh_tid(lh) : (uint32_t)(-1));
-		tls->lh = lh;
-		return 0;
-	}
-
-	/* acquire a lock_holder structure and add to the list */
-	lh = lh_new(symbol, 0);
-	tls->lh = lh;
-
-	mtx_lock(&libc_mutex);
-	lh_add(lh);
-	mtx_unlock(&libc_mutex);
-
-#else
-	if (!tls)
-		return 0;
-	tls->lh = lh_new(symbol, 0);
-#endif
-	return 1;
-}
-
-void __hidden __put_libc(void)
-{
-	tls_release_lh(peek_tls());
 }
 
 /**
@@ -541,10 +390,7 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 	parent = libc.forking;
 	tls = get_tls();
 	if (!tls)
-		goto out_clear;
-
-	if (!__get_libc(tls, symbol))
-		goto out_clear;
+		goto out;
 
 	/* initialized once per process */
 	setup_wrap_cache();
@@ -584,9 +430,6 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 	did_wrap = wrap_special(tls);
 
 out:
-	__put_libc();
-
-out_clear:
 	__clear_wrapping();
 
 	/*
@@ -703,11 +546,6 @@ int __hidden init_libc_iface(struct libc_iface *iface, const char *dso_path)
 	iface->memset(&dvm, 0, sizeof(dvm));
 	iface->memset(&zlib, 0, sizeof(zlib));
 
-#ifdef LIBC_DEBUG_LOCKING
-	iface->lh.next = iface->lh.prev = &(iface->lh);
-	iface->lh.tid = 0;
-	iface->lh.sym = "[root]";
-#endif
 	return 0;
 }
 

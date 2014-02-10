@@ -25,8 +25,6 @@ static struct tls_info main_tls;
 static void __free_tls(struct tls_info *tls);
 static void thread_tls_cleanup(void *arg);
 
-extern void __lh_clear(void);
-
 /*
  * This function will be called after a fork(), from the child process
  */
@@ -53,8 +51,6 @@ static void tls_init_child(int acquire)
 	libc.pthread_key_delete(s_wrap_tls_key);
 	s_wrap_tls_key = (pthread_key_t)(-1);
 	libc.memset(&main_tls, 0, sizeof(main_tls));
-
-	__lh_clear();
 
 	if (!acquire)
 		return;
@@ -144,7 +140,6 @@ static void __free_tls(struct tls_info *tls)
 	tls_release_btcache(tls);
 	tls_release_logbuffer(tls);
 	tls_release_logfile(tls);
-	tls_release_lh(tls);
 
 	libc.memset(tls, 0, sizeof(*tls));
 

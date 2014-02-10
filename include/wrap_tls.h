@@ -29,9 +29,10 @@ struct tls_info {
 	__pthread_cleanup_t pth_cleanup;
 	int should_cleanup;
 #endif
-
-	trace_ptr_t lh;
 };
+
+#define wsym(TLS) \
+	((TLS)->info.symbol)
 
 extern void init_tls(void);
 
@@ -44,6 +45,5 @@ extern void tls_release_logfile(struct tls_info *tls);
 extern void tls_release_logbuffer(struct tls_info *tls);
 extern void tls_release_btcache(struct tls_info *tls);
 extern void tls_release_dvmstack(struct tls_info *tls);
-extern void tls_release_lh(struct tls_info *tls);
 
 #endif
