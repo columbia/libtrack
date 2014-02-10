@@ -321,19 +321,19 @@ void __hidden setup_wrap_cache(void)
 
 	/* setup functions we want to dynamically rename in the BT */
 	add_entry("epoll_wait", handle_epoll, 0, 1);
-	add_entry("read", handle_rename_fd1, 0, 1);
-	add_entry("readv", handle_rename_fd1, 0, 1);
-	add_entry("pread", handle_rename_fd1, 0, 1);
-	add_entry("pread64", handle_rename_fd1, 0, 1);
-	add_entry("write", handle_rename_fd1, 0, 1);
-	add_entry("writev", handle_rename_fd1, 0, 1);
-	add_entry("pwrite", handle_rename_fd1, 0, 1);
-	add_entry("pwrite64", handle_rename_fd1, 0, 1);
-	add_entry("ioctl", handle_rename_fd1, 0, 1);
-	add_entry("__ioctl", handle_rename_fd1, 0, 1);
-	add_entry("fcntl", handle_rename_fd1, 0, 1);
-	add_entry("__fcntl", handle_rename_fd1, 0, 1);
-	add_entry("__fcntl64", handle_rename_fd1, 0, 1);
+	add_entry("read", handle_rename_fd1, 1, 1);
+	add_entry("readv", handle_rename_fd1, 1, 1);
+	add_entry("pread", handle_rename_fd1, 1, 1);
+	add_entry("pread64", handle_rename_fd1, 1, 1);
+	add_entry("write", handle_rename_fd1, 1, 1);
+	add_entry("writev", handle_rename_fd1, 1, 1);
+	add_entry("pwrite", handle_rename_fd1, 1, 1);
+	add_entry("pwrite64", handle_rename_fd1, 1, 1);
+	add_entry("ioctl", handle_rename_fd1, 1, 1);
+	add_entry("__ioctl", handle_rename_fd1, 1, 1);
+	add_entry("fcntl", handle_rename_fd1, 1, 1);
+	add_entry("__fcntl", handle_rename_fd1, 1, 1);
+	add_entry("__fcntl64", handle_rename_fd1, 1, 1);
 	/* TODO: select? */
 	/* TODO: fdprintf ? */
 	/* TODO: fstatfs ? */
@@ -1169,6 +1169,15 @@ int handle_rename_fd1(struct tls_info *tls)
 	struct ret_ctx *ret;
 
 	info = &tls->info;
+	fd = (int)info->regs[0];
+
+	if (info->should_handle) {
+		/* print out the FD used in this call */
+		if (info->should_log)
+			bt_printf(tls, "LOG:I:fd(%d):\n", fd);
+		return 0;
+	}
+
 	if (!info->should_mod_sym)
 		return 0;
 
@@ -1178,7 +1187,6 @@ int handle_rename_fd1(struct tls_info *tls)
 	 *          ioctl, __ioctl, fcntl, __fcntl
 	 * all have fd as first argument!
 	 */
-	fd = (int)info->regs[0];
 	type = get_fdtype(fd);
 
 	ret = get_retmem(tls);
