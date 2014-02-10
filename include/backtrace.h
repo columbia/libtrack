@@ -11,8 +11,6 @@
 #include "wrap_lib.h"
 #include "wrap_tls.h"
 
-//#define BT_DONT_WRITE_LOG
-
 #define MAX_BT_FRAMES 128
 #define MAX_LINE_LEN  256
 

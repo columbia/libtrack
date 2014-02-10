@@ -28,17 +28,6 @@ extern void wrap_symbol_mod(struct tls_info *tls);
  */
 #define FRAMES_TO_SKIP 2
 
-#ifdef HAVE_SIGHANDLER
-extern void setup_special_sighandler(struct log_info *info, int sig);
-#else
-static void setup_special_sighandler(struct log_info *info, int sig)
-{
-	(void)info;
-	(void)sig;
-	return;
-}
-#endif
-
 #define TLS_LOGBUF_SZ (LOG_BUFFER_SIZE \
 		       + (4 * sizeof(int)) \
 		       + (MAX_BT_FRAMES * sizeof(void *)))
@@ -158,10 +147,6 @@ static int bt_setup_logbuffer(struct tls_info *tls, struct log_info *info)
 		libc.memset(buf, 0, TLS_LOGBUF_SZ);
 		tls->logbuffer = (void *)buf;
 
-		/*
-		 * This signal handler will flush logs!
-		 */
-		setup_special_sighandler(info, SIGUSR2);
 		bt_flush(tls, info);
 		if (tls->logfile)
 			log_flush(tls->logfile);
@@ -503,11 +488,4 @@ log_backtrace(struct tls_info *tls)
 		unwind_backtrace(tls);
 	else if (tls->logfile)
 		__log_print(&tls->info.tv, tls->logfile, "CALL", "%s", tls->info.symbol);
-
-#if 0
-#ifndef AGGRESIVE_FLUSHING
-	/* flush the log buffer contents to the log file stream */
-	bt_flush(tls, info);
-#endif
-#endif
 }

@@ -16,7 +16,12 @@ struct zlib_iface zlib;
 
 void init_zlib_iface(struct zlib_iface *zlib, const char *path)
 {
+	if (zlib->dso == (void *)1)
+		return;
+
 	if (!zlib->dso) {
+		zlib->valid = 0;
+		zlib->dso = (void *)1;
 		zlib->dso = dlopen(path, RTLD_NOW | RTLD_LOCAL);
 		if (!zlib->dso)
 			_BUG(0x40);
@@ -49,7 +54,7 @@ void init_zlib_iface(struct zlib_iface *zlib, const char *path)
 
 out_err:
 	dlclose(zlib->dso);
-	memset(zlib, 0, sizeof(*zlib));
+	libc.memset(zlib, 0, sizeof(*zlib));
 	zlib->dso = (void *)1; /* to prevent further init attempts */
 }
 
@@ -60,8 +65,8 @@ void close_zlib_iface(struct zlib_iface *zlib)
 		return;
 
 	dso = zlib->dso;
-	zlib->dso = NULL;
-
 	libc.memset(zlib, 0, sizeof(*zlib));
+	zlib->dso = (void *)1;
 	dlclose(dso);
+	zlib->dso = NULL;
 }

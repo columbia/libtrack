@@ -10,10 +10,11 @@
 #include <unistd.h>
 #include <sys/types.h>
 
-#include "wrap_lib.h"
-#include "wrap_tls.h"
 #include "backtrace.h"
 #include "java_backtrace.h"
+#include "libz.h"
+#include "wrap_lib.h"
+#include "wrap_tls.h"
 
 extern int local_strcmp(const char *s1, const char *s2);
 extern int local_strncmp(const char *s1, const char *s2, size_t n);
@@ -44,15 +45,17 @@ int handle_rename_fd1(struct tls_info *tls);
 
 #define safe_call(INFO, ERR, CODE...) \
 	__put_libc(); \
+	__clear_wrapping(); \
 	CODE; \
 	ERR = *__errno(); \
-	__get_libc(get_tls(), (INFO)->symbol);
+	if (__set_wrapping()) \
+		__get_libc(get_tls(), (INFO)->symbol);
 
 /*
  * keep a table of valid file descriptors and their types
  */
 #define MIN_FDTABLE_SZ 128
-static pthread_mutex_t fdtable_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t fdtable_mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
 static int   fdtable_sz = MIN_FDTABLE_SZ;
 static char  init_fdtable[MIN_FDTABLE_SZ];
 static char *fdtable = init_fdtable;
@@ -65,7 +68,7 @@ static inline int __maybe_grow_fdtable(int fd)
 		char *newtable = (char *)libc.malloc(newsz);
 		if (!newtable)
 			return -1;
-		libc_log("I:grow fdtable from %d to %d", fdtable_sz, newsz);
+		/* libc_log("I:grow fdtable from %d to %d", fdtable_sz, newsz); */
 		libc.memset(newtable, 0, newsz);
 		if (fdtable_sz) { /* copy over the old table */
 			libc.memcpy(newtable, fdtable, fdtable_sz);
@@ -89,6 +92,9 @@ static inline char get_fdtype(int fd)
 		goto out_unlock;
 
 	c = fdtable[fd];
+	if (!c &&
+	    (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO))
+		c = fdtable[fd] = 'f';
 
 out_unlock:
 	mtx_unlock(&fdtable_mutex);
@@ -123,7 +129,6 @@ static struct wrap_cache_entry {
 	uint8_t wrapsym;  /* should be called from wrap_special */
 	uint8_t modsym;   /* should be called to modify symbol name */
 } s_wrap_cache[WRAP_CACHE_SZ];
-static pthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static inline uint8_t wrap_hash(const char *name)
 {
@@ -368,7 +373,6 @@ int handle_fork(struct tls_info *tls)
 {
 	if (!tls->info.should_handle)
 		return 0;
-	close_dvm_iface(&dvm);
 	flush_and_close(tls);
 	libc.forking = libc.getpid();
 	return 0;
@@ -479,7 +483,6 @@ int handle_exec(struct tls_info *tls)
 	if (info->should_log)
 		bt_printf(tls, "LOG:I:%s:%s:\n", info->symbol, (const char *)info->regs[0]);
 
-	close_dvm_iface(&dvm);
 	flush_and_close(tls);
 
 	return 0;
@@ -554,15 +557,20 @@ static void wrapped_sighandler(int sig, struct siginfo *siginfo, void *ctx)
 
 	if (sig == s_special_sig) {
 		__flush_btlog();
-		libc_log("CAUGHT_SIGNAL:%d:%s:", sig, signame(sig));
+		libc_log("SIG:LOG_FLUSH:%d:%s:", sig, signame(sig));
 		libc.fflush(NULL); /* flush the entire process' buffers */
 		libc_close_log();
 		return;
 	}
 
 	/* NOTE: siginfo and ctx may be invalid! */
-	if (s_sighandler[sig])
+	if (s_sighandler[sig]) {
+		/* flush the logs every time we get a signal
+		 * that the app handles */
+		__flush_btlog();
+		libc_close_log();
 		(s_sighandler[sig])(sig, siginfo, ctx);
+	}
 }
 
 /*
@@ -616,7 +624,7 @@ int handle_signal(struct tls_info *tls)
 	return 0;
 }
 
-void __hidden setup_special_sighandler(struct log_info *info, int sig)
+void __hidden setup_special_sighandler(int sig)
 {
 	struct sigaction sa;
 
@@ -629,7 +637,7 @@ void __hidden setup_special_sighandler(struct log_info *info, int sig)
 
 	s_special_sig = sig;
 
-	if (info->should_log)
+	if (should_log())
 		libc_log("I:Installed special handler for sig %d", sig);
 }
 
@@ -662,6 +670,7 @@ static const char fd_types[] = {
 	'D', /* device files (/dev) */
 	'E', /* epoll FD */
 	'F', /* regular file / directory */
+	'f', /* stdin/stdout/stderr */
 	'K', /* special kernel file (/sys or /proc) */
 	'k', /* special kernel file (/sys or /proc) */
 	'P', /* pipe */
@@ -843,7 +852,8 @@ int handle_dup(struct tls_info *tls)
 	if (rval >= 0) {
 		set_fdtype(rval, type);
 		if (info->should_log)
-			bt_printf(tls, "LOG:I:fd(%d)='%c':\n", rval, type);
+			bt_printf(tls, "LOG:I:fd(%d)='%c':\n",
+				  rval, type ? type : '?');
 	}
 
 	ret = get_retmem(NULL);
@@ -925,7 +935,6 @@ int handle_pipe(struct tls_info *tls)
 		FILE *f;
 
 		/* popen forks! */
-		close_dvm_iface(&dvm);
 		flush_and_close(tls);
 		libc.forking = libc.getpid();
 

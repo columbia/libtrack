@@ -214,9 +214,7 @@ static void ___open_log(struct tls_info *tls, int acquire_new, void **logf)
 	if (logf)
 		*logf = NULL;
 
-	if (!tls)
-		return;
-	if (libc.dso == (void *)1)
+	if (!tls || libc.dso == (void *)1)
 		return;
 	if (!libc.dso) {
 		if (init_libc_iface(&libc, LIBC_PATH) < 0)
@@ -225,7 +223,6 @@ static void ___open_log(struct tls_info *tls, int acquire_new, void **logf)
 
 	if (!zlib.dso)
 		init_zlib_iface(&zlib, ZLIB_DFLT_PATH);
-	zlib.valid = 0;
 
 	f = tls->logfile;
 	if (!f && acquire_new) {
@@ -440,6 +437,26 @@ void __hidden tls_release_lh(struct tls_info *tls)
 	lh_free(lh);
 }
 
+static pthread_key_t s_wrapping_key = (pthread_key_t)(-1);
+
+int __hidden __set_wrapping(void)
+{
+	if (s_wrapping_key == (pthread_key_t)(-1)) {
+		libc.pthread_key_create(&s_wrapping_key, NULL);
+		libc.pthread_setspecific(s_wrapping_key, NULL);
+	}
+	if (libc.pthread_getspecific(s_wrapping_key)) \
+		return 0;
+	libc.pthread_setspecific(s_wrapping_key, (void *)1);
+	return 1;
+}
+
+void __hidden __clear_wrapping(void)
+{
+	libc.pthread_setspecific(s_wrapping_key, NULL);
+}
+
+
 int __hidden __get_libc(struct tls_info *tls, const char *symbol)
 {
 	int i;
@@ -450,11 +467,8 @@ int __hidden __get_libc(struct tls_info *tls, const char *symbol)
 
 	lh = tls->lh;
 
-	/* we're already tracing - disable recursion */
-	if (lh == (trace_ptr_t)1 || lh_valid(lh))
+	if (lh_valid(lh))
 		return 0;
-
-	tls->lh = (trace_ptr_t)1;
 
 #ifdef LIBC_LOCK_DEBUGGING
 	lh = __lh_lookup(libc.gettid());
@@ -520,8 +534,9 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 			BUG(0x31);
 	}
 
-	/* initialized once per process */
-	setup_wrap_cache();
+	/* we're already tracing - disable recursion */
+	if (!__set_wrapping())
+		return 0;
 
 	parent = libc.forking;
 	tls = get_tls();
@@ -532,6 +547,9 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 		(*__errno()) = _err;
 		return 0;
 	}
+
+	/* initialized once per process */
+	setup_wrap_cache();
 
 	tls->info.regs = (uint32_t *)regs;
 	tls->info.symbol = symbol;
@@ -550,8 +568,10 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 		___open_log(tls, 1, &f);
 		if (!f)
 			goto out;
-		if (parent && parent != libc.getpid())
-			bt_printf(tls, "LOG:I:FORKED:parent=%d:", parent);
+		if (parent && parent != libc.getpid()) {
+			log_print(f, LOG, "I:FORKED:parent=%d:", parent);
+			log_flush(f);
+		}
 		log_backtrace(tls);
 	} else if (tls->logfile) {
 		/*
@@ -567,6 +587,7 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 
 out:
 	__put_libc();
+	__clear_wrapping();
 
 	/*
 	 * reset errno if we didn't wrap, if we _did_ wrap the wrapped_return
@@ -680,6 +701,7 @@ int __hidden init_libc_iface(struct libc_iface *iface, const char *dso_path)
 #undef init_sym
 
 	iface->memset(&dvm, 0, sizeof(dvm));
+	iface->memset(&zlib, 0, sizeof(zlib));
 
 #ifdef LIBC_DEBUG_LOCKING
 	iface->lh.next = iface->lh.prev = &(iface->lh);

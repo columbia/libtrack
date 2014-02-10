@@ -8,6 +8,16 @@
 #include "wrap_tls.h"
 #include "wrap_lib.h"
 
+#ifdef HAVE_SIGHANDLER
+extern void setup_special_sighandler(int sig);
+#else
+static void setup_special_sighandler(int sig)
+{
+	(void)sig;
+	return;
+}
+#endif
+
 static pthread_key_t s_wrap_tls_key = (pthread_key_t)-1;
 
 static struct tls_info main_tls;
@@ -49,9 +59,7 @@ static void tls_init_child(int acquire)
 	if (!acquire)
 		return;
 
-	if (libc.pthread_key_create(&s_wrap_tls_key, NULL) != 0)
-		return;
-	libc.pthread_setspecific(s_wrap_tls_key, NULL);
+	init_tls();
 }
 
 void __hidden init_tls(void)
@@ -100,6 +108,11 @@ static struct tls_info *__get_tls(int acquire, int reset)
 
 	libc.__pthread_cleanup_push(&tls->pth_cleanup, thread_tls_cleanup, tls);
 	tls->should_cleanup = 1;
+
+	/*
+	 * This signal handler will flush logs!
+	 */
+	setup_special_sighandler(SIGUSR2);
 
 	libc.pthread_setspecific(s_wrap_tls_key, (void *)tls);
 
@@ -165,15 +178,22 @@ static void thread_tls_cleanup(void *arg)
 {
 	struct tls_info *tls;
 
+	if (!__set_wrapping())
+		return;
+
 	tls = __get_tls(0, 1);
 	if (!tls)
-		return;
+		goto out;
 
 	if ((void *)tls != arg) {
 		/* has the tls key been cleared already?! */
-		return;
+		goto out;
 	}
 
 	__free_tls(tls);
+
+out:
+	__clear_wrapping();
+	return;
 }
 

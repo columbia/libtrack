@@ -5,7 +5,12 @@
 #ifndef WRAP_LIB_H
 #define WRAP_LIB_H
 
+/*
+ * Uncomment the following line to flush after almost every print.
+ * NOTE: this is only recommended for debugging!
+ */
 //#define AGGRESIVE_FLUSHING
+
 //#define LIBC_DEBUG_LOCKING
 
 #include <dlfcn.h>
@@ -220,6 +225,9 @@ extern int cached_pid;
 
 struct tls_info;
 
+extern int  __set_wrapping(void);
+extern void __clear_wrapping(void);
+
 extern int  __get_libc(struct tls_info *tls, const char *symbol);
 extern void __put_libc(void);
 
@@ -267,7 +275,7 @@ static inline int should_log(void)
 
 extern volatile int*  __errno(void);
 
-#define LOG_BUFFER_SIZE (8 * 1024)
+#define LOG_BUFFER_SIZE (64 * 1024)
 
 struct log_info {
 	const char *symbol;
@@ -348,7 +356,7 @@ extern struct ret_ctx *get_retmem(struct tls_info *tls);
 		if (!tls) \
 			break; \
 		if (zlib.valid && tls->info.log_pos) { \
-			bt_printf(tls, fmt, ## __VA_ARGS__); \
+			bt_printf(tls, fmt "\n", ## __VA_ARGS__); \
 			bt_flush(tls, &(tls->info)); \
 		} else { \
 			log_print(tls->logfile, LOG, fmt, ## __VA_ARGS__ ); \
