@@ -234,17 +234,17 @@ void __hidden setup_wrap_cache(void)
 	 */
 	add_entry("__open", handle_open, 1, 0);
 	add_entry("__openat", handle_openat, 1, 0);
-	add_entry("__sclose", handle_closefptr, 1, 0);
+	add_entry("__sclose", handle_closefptr, 1, 1);
 	add_entry("accept", handle_accept, 1, 0);
-	add_entry("close", handle_closefd, 1, 0);
+	add_entry("close", handle_closefd, 1, 1);
 	add_entry("dup", handle_dup, 1, 0);
 	add_entry("dup2", handle_dup, 1, 0);
-	add_entry("fclose", handle_closefptr, 1, 0);
+	add_entry("fclose", handle_closefptr, 1, 1);
 	add_entry("fopen", handle_fopen, 1, 0);
 	add_entry("freopen", handle_fopen, 1, 0);
 	add_entry("open", handle_open, 1, 0);
 	add_entry("openat", handle_openat, 1, 0);
-	add_entry("pclose", handle_closefptr, 1, 0);
+	add_entry("pclose", handle_closefptr, 1, 1);
 	add_entry("pipe", handle_pipe, 1, 0);
 	add_entry("pipe2", handle_pipe, 1, 0);
 	add_entry("popen", handle_pipe, 1, 0);
@@ -1010,10 +1010,34 @@ int handle_accept(struct tls_info *tls)
 	return 1;
 }
 
+static int __rename_close(struct tls_info *tls, int fd)
+{
+	char type;
+	struct log_info *info;
+	struct ret_ctx *ret;
+
+	info = &tls->info;
+
+	type = get_fdtype(fd);
+
+	ret = get_retmem(tls);
+	if (!ret)
+		return 0;
+
+	libc.snprintf(ret->symmod, MAX_SYMBOL_LEN, "%s_%c",
+		      info->symbol, type ? type : '?');
+	info->symbol = (const char *)ret->symmod;
+
+	return 0;
+}
+
 int handle_closefd(struct tls_info *tls)
 {
 	int fd;
 	struct log_info *info = &tls->info;
+
+	if (info->should_mod_sym)
+		return __rename_close(tls, (int)tls->info.regs[0]);
 
 	if (!info->should_handle)
 		return 0;
@@ -1035,13 +1059,16 @@ int handle_closefptr(struct tls_info *tls)
 	int fd;
 	struct log_info *info = &tls->info;
 
+	f = (FILE *)info->regs[0];
+	fd = libc.fno(f);
+
+	if (info->should_mod_sym)
+		return __rename_close(tls, fd);
+
 	if (!info->should_handle)
 		return 0;
 
 	/* handle: fclose(), pclose(), __sclose() */
-
-	f = (FILE *)info->regs[0];
-	fd = libc.fno(f);
 
 	mtx_lock(&fdtable_mutex);
 	if (fd < fdtable_sz)
