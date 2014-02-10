@@ -563,12 +563,13 @@ alloc_new:
 	return new_env;
 }
 
-static void setup_exec_env(void)
+static void setup_exec_env(struct tls_info *tls)
 {
 	const char *ld_preload = LIB_PATH "/" _str(_IBNAM_)
 				 ":" LIB_PATH "/" _str(LIBNAME);
 	libc.setenv("LD_PRELOAD", ld_preload, 1);
-	/* libc_log("I:New LD_PRELOAD value '%s'", ld_preload); */
+	if (tls->info.should_log)
+		bt_printf(tls, "LOG:I:New LD_PRELOAD value '%s'", ld_preload);
 	/* libc.setenv("LD_DEBUG", "3", 1); */
 }
 
@@ -585,12 +586,14 @@ int handle_exec(struct tls_info *tls)
 	if (local_strcmp("execve", info->symbol) == 0)
 		info->regs[2] = (uint32_t)wrap_environ((const char **)info->regs[2]);
 	else
-		setup_exec_env();
+		setup_exec_env(tls);
 
 	if (info->should_log)
 		bt_printf(tls, "LOG:I:%s:%s:\n", info->symbol, (const char *)info->regs[0]);
 
+	close_dvm_iface(&dvm);
 	flush_and_close(tls);
+	clear_tls(1);
 
 	return 0;
 }
