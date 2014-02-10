@@ -208,7 +208,7 @@ static inline int should_log(void)
 
 extern volatile int*  __errno(void);
 
-#define LOG_BUFFER_SIZE (64 * 1024)
+#define LOG_BUFFER_SIZE (128 * 1024)
 
 struct log_info {
 	const char *symbol;

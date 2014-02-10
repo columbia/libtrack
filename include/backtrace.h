@@ -39,7 +39,7 @@ struct bt_line {
 	char      str[MAX_LINE_LEN];
 };
 
-#define BT_CACHE_BITS 9
+#define BT_CACHE_BITS 8
 #define BT_CACHE_SZ   (1 << BT_CACHE_BITS)
 #define BT_CACHE_MSK  (BT_CACHE_SZ - 1)
 
@@ -56,6 +56,7 @@ static inline uint16_t bt_hash(void *sym)
 
 /*
  * With a 256 byte line, this is approximately 528k per thread
+ * for a 9-bit hash, or 132k for an 8-bit hash
  */
 struct bt_line_cache {
 	int usage;
