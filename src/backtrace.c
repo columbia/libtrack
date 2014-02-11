@@ -215,6 +215,7 @@ static inline void print_info(struct tls_info *tls, int count, void *sym)
 	Dl_info dli;
 
 	info = &tls->info;
+
 	cline = bt_cache_fetch(sym, &cache);
 	if (!cline)
 		goto do_lookup;
@@ -226,8 +227,17 @@ static inline void print_info(struct tls_info *tls, int count, void *sym)
 			    cache->usage, cache->hit, cache->miss);
 #endif
 
-	if (cline->sym == sym) { /* cache hit! */
-		__bt_printf(tls, " :%d:%s", count, cline->str);
+	if (cline->sym == sym){ /* cache hit! */
+		/* because we dynamically change the name of the calling
+		 * symbol based on input, we can't cache that part of the
+		 * string. For the last entry in the backtrace we just cache
+		 * the dladdr results
+		 */
+		if (count > 0)
+			__bt_printf(tls, " :%d:%s", count, cline->str);
+		else
+			__bt_printf(tls, " :0:%x:%s:%s",
+				    (unsigned int)sym, info->symbol, cline->str);
 		return;
 	}
 
@@ -257,11 +267,23 @@ do_lookup:
 		symname = info->symbol;
 
 	if (cline) {
-		libc.snprintf(cline->str, MAX_LINE_LEN,
-			      "%x:%s:%c0x%x:%s(%p):\n",
-			      (unsigned int)sym, symname,
-			      c, ofst, dli.dli_fname, dli.dli_fbase);
-		__bt_printf(tls, " :%d:%s", count, cline->str);
+		if (count > 0) {
+			libc.snprintf(cline->str, MAX_LINE_LEN,
+				      "%x:%s:%c0x%x:%s(%p):\n",
+				      (unsigned int)sym, symname,
+				      c, ofst, dli.dli_fname, dli.dli_fbase);
+			__bt_printf(tls, " :%d:%s", count, cline->str);
+		} else {
+			/* only cache the dladdr() lookup results
+			 * for the last symbol in the BT stack - this allows
+			 * us to properly dynamically rename based on input
+			 */
+			libc.snprintf(cline->str, MAX_LINE_LEN,
+				      "%c0x%x:%s(%p):\n",
+				      c, ofst, dli.dli_fname, dli.dli_fbase);
+			__bt_printf(tls, " :0:%x:%s:%s",
+				    (unsigned int)sym, symname, cline->str);
+		}
 		return;
 	}
 
