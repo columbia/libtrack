@@ -66,7 +66,7 @@ static char *fdtable = init_fdtable;
 /* caller must hold fdtable_mutex */
 static inline int __maybe_grow_fdtable(int fd)
 {
-	if (fd > fdtable_sz) {
+	if (fd >= fdtable_sz) {
 		int newsz = fd < (MIN_FDTABLE_SZ*2) ? MIN_FDTABLE_SZ*2 : fd * 2;
 		char *newtable = (char *)libc.malloc(newsz);
 		if (!newtable)
@@ -114,6 +114,40 @@ static inline char __get_path_type(const char *path)
 	return type;
 }
 
+
+static const char fd_types[] = {
+	'B', /* /dev/binder */
+	'D', /* device files (/dev) */
+	'E', /* epoll FD */
+	'F', /* regular file / directory */
+	'K', /* special kernel file (/sys or /proc) */
+	'k', /* special kernel file (/sys or /proc) */
+	'P', /* pipe */
+	'p', /* popen pipe */
+	'S', /* network socket */
+	'U', /* unix domain socket (local) */
+};
+
+struct sockaddr_max {
+	struct sockaddr sa;
+	char d[256];
+};
+
+static char __get_socktype(int sockfd)
+{
+	struct sockaddr_max sam;
+	int len = sizeof(sam);
+
+	if (!libc.getsockname)
+		return 'S';
+
+	if (libc.getsockname(sockfd, (struct sockaddr *)&sam.sa, &len) < 0)
+		return 'S';
+	if (sam.sa.sa_family == AF_UNIX || sam.sa.sa_family == AF_LOCAL)
+		return 'U';
+	return 'S';
+}
+
 static char __guess_fdtype(int fd)
 {
 	char path[32];
@@ -132,7 +166,7 @@ static char __guess_fdtype(int fd)
 		if (local_strncmp("pipe:", buf, 5) == 0)
 			return 'P';
 		if (local_strncmp("socket:", buf, 7) == 0)
-			return 'S';
+			return __get_socktype(fd);
 		if (local_strncmp("anon_inode:[eventpoll]", buf, 22) == 0)
 			return 'e';
 		return '?';
@@ -153,10 +187,7 @@ static inline char get_fdtype(int fd)
 
 	c = fdtable[fd];
 	if (!c) {
-		if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO)
-			c = 'f';
-		else
-			c = __guess_fdtype(fd);
+		c = __guess_fdtype(fd);
 		fdtable[fd] = c;
 	}
 
@@ -334,6 +365,7 @@ void __hidden setup_wrap_cache(void)
 	add_entry("fcntl", handle_rename_fd1, 1, 1);
 	add_entry("__fcntl", handle_rename_fd1, 1, 1);
 	add_entry("__fcntl64", handle_rename_fd1, 1, 1);
+	add_entry("fstat", handle_rename_fd1, 1, 1);
 	/* TODO: select? */
 	/* TODO: fdprintf ? */
 	/* TODO: fstatfs ? */
@@ -774,19 +806,6 @@ int handle_sigaction(struct tls_info *tls)
 	return 0;
 }
 
-static const char fd_types[] = {
-	'B', /* /dev/binder */
-	'D', /* device files (/dev) */
-	'E', /* epoll FD */
-	'F', /* regular file / directory */
-	'f', /* stdin/stdout/stderr */
-	'K', /* special kernel file (/sys or /proc) */
-	'k', /* special kernel file (/sys or /proc) */
-	'P', /* pipe */
-	'p', /* popen pipe */
-	'S', /* network socket */
-};
-
 int handle_open(struct tls_info *tls)
 {
 	struct ret_ctx *ret;
@@ -959,6 +978,9 @@ int handle_socket(struct tls_info *tls)
 	struct ret_ctx *ret;
 	int rval, err;
 	struct log_info *info;
+	char type;
+	int domain;
+	int *sv;
 	int (*sockfunc)(int, int, int, int *);
 
 	info = &tls->info;
@@ -971,17 +993,33 @@ int handle_socket(struct tls_info *tls)
 	 * int socketpair(int domain, int type, int protocol, int sv[2]);
 	 */
 	sockfunc = info->func;
+	domain = (int)info->regs[0];
+	sv = (int *)(info->regs[3]);
 
-	safe_call(info, err,
-		  rval = sockfunc((int)info->regs[0], (int)info->regs[1],
-				  (int)info->regs[2], (int *)info->regs[3])
-		 );
-	if (rval >= 0) {
-		set_fdtype(rval, 'S');
+	type = 'S';
+	if (domain == AF_UNIX || domain == AF_LOCAL)
+		type = 'U';
+
+	safe_call(info, err, rval = sockfunc(domain, (int)info->regs[1],
+					     (int)info->regs[2], sv));
+	if (rval < 0)
+		goto out;
+
+	if (local_strncmp("tpair", info->symbol + 5, 5) == 0) {
+		/* socket pair returns values in sv */
+		set_fdtype(sv[0], type);
+		set_fdtype(sv[1], type);
 		if (info->should_log)
-			bt_printf(tls, "LOG:I:fd(%d)='S':\n", rval);
+			bt_printf(tls, "LOG:I:fd(%d)='%c':\n"
+				       "LOG:I:fd(%d)='%c':\n",
+				       sv[0], type, sv[1], type);
+	} else {
+		set_fdtype(rval, type);
+		if (info->should_log)
+			bt_printf(tls, "LOG:I:fd(%d)='%c':\n", rval, type);
 	}
 
+out:
 	ret = get_retmem(NULL);
 	if (!ret)
 		BUG_MSG(0x4316, "No TLS return value!");
@@ -1060,8 +1098,9 @@ int handle_pipe(struct tls_info *tls)
 int handle_accept(struct tls_info *tls)
 {
 	struct ret_ctx *ret;
-	int rval, err;
+	int rval, err, sockfd;
 	struct log_info *info;
+	char type;
 	int (*acceptfunc)(int, void *, void *);
 
 	info = &tls->info;
@@ -1072,10 +1111,12 @@ int handle_accept(struct tls_info *tls)
 	 * handles:
 	 * int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 	 */
+	sockfd = (int)info->regs[0];
 	acceptfunc = info->func;
+	type = get_fdtype(sockfd);
 
 	safe_call(info, err,
-		  rval = acceptfunc((int)info->regs[0], (void *)info->regs[1],
+		  rval = acceptfunc(sockfd, (void *)info->regs[1],
 				    (void *)info->regs[2])
 		 );
 	if (rval >= 0) {
@@ -1119,20 +1160,23 @@ int handle_closefd(struct tls_info *tls)
 	int fd;
 	struct log_info *info = &tls->info;
 
+	fd = (int)info->regs[0];
+
 	if (info->should_mod_sym)
-		return __rename_close(tls, (int)tls->info.regs[0]);
+		return __rename_close(tls, fd);
 
 	if (!info->should_handle)
 		return 0;
 
 	/* handle: close() */
 
-	fd = (int)info->regs[0];
-
 	mtx_lock(&fdtable_mutex);
 	if (fd < fdtable_sz)
 		fdtable[fd] = 0; /* it's now closed */
 	mtx_unlock(&fdtable_mutex);
+
+	if (info->should_log)
+		bt_printf(tls, "LOG:I:%s:fd(%d):\n", info->symbol, fd);
 	return 0;
 }
 
@@ -1158,6 +1202,9 @@ int handle_closefptr(struct tls_info *tls)
 		fdtable[fd] = 0; /* it's now closed */
 	mtx_unlock(&fdtable_mutex);
 
+	if (info->should_log)
+		bt_printf(tls, "LOG:I:%s:fd(%d):\n", info->symbol, fd);
+
 	return 0;
 }
 
@@ -1174,7 +1221,7 @@ int handle_rename_fd1(struct tls_info *tls)
 	if (info->should_handle) {
 		/* print out the FD used in this call */
 		if (info->should_log)
-			bt_printf(tls, "LOG:I:fd(%d):\n", fd);
+			bt_printf(tls, "LOG:I:%s:fd(%d):\n", info->symbol, fd);
 		return 0;
 	}
 
@@ -1193,8 +1240,7 @@ int handle_rename_fd1(struct tls_info *tls)
 	if (!ret)
 		return 0;
 
-	libc.snprintf(ret->symmod, MAX_SYMBOL_LEN, "%s_%c",
-		      info->symbol, type ? type : '?');
+	libc.snprintf(ret->symmod, MAX_SYMBOL_LEN, "%s_%c", info->symbol, type);
 	info->symbol = (const char *)ret->symmod;
 
 	return 0;

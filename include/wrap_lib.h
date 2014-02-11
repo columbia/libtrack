@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <unwind.h>
 #include <sys/cdefs.h>
+#include <sys/socket.h>
 
 __BEGIN_DECLS
 
@@ -131,6 +132,8 @@ struct libc_iface {
 	int (*sigaction)(int sig, const struct sigaction *act,
 			 struct sigaction *oact);
 	char *(*strsignal)(int sig);
+
+	int (*getsockname)(int sockfd, struct sockaddr *addr, int* addrlen);
 
 	void (*__cxa_finalize)(void *dso);
 	int (*raise)(int sig);
