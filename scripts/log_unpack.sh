@@ -30,6 +30,14 @@ for i in `ls -1 *.gz`; do
 	$GUNZIP -c "$i" > "${LDIR}/${i/.gz}" 2>>"${ZDIR}/unpack_errors.txt"
 done
 
+echo -e "\n"
+echo "Copied" "$(
+for i in `ls -1 *.log`; do
+    cp $i "${LDIR}/$i"
+    echo "copy $i"
+done | wc -l
+)" "uncomplressed files in '${LDIR}'"
+
 SZ=`du -sh d | awk '{print $1}'`
 popd >/dev/null 2> /dev/null
 

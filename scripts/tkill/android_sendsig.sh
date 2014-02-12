@@ -10,5 +10,5 @@ if [ ! -x "$tkill" ]; then
 	exit 1
 fi
 
-PID_LIST=`ls /data/trace_logs | grep -v sh | awk -F '.' '{print $1"."$2}' | uniq`
+PID_LIST=`ls /data/trace_logs | grep -v sh | busybox awk -F '.' '{print $1"."$2}' | busybox uniq`
 $tkill 12 $PID_LIST
