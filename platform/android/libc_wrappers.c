@@ -37,6 +37,7 @@ static int handle_sigaction(struct tls_info *tls);
 
 static int handle_dup(struct tls_info *tls);
 static int handle_open(struct tls_info *tls);
+static int handle_opendir(struct tls_info *tls);
 static int handle_openat(struct tls_info *tls);
 static int handle_fopen(struct tls_info *tls);
 static int handle_socket(struct tls_info *tls);
@@ -84,50 +85,6 @@ static inline int __maybe_grow_fdtable(int fd)
 	return 0;
 }
 
-static inline char __get_path_type(const char *path)
-{
-	char type = 'F'; /* default to standard file system type */
-
-	if (!path)
-		return '\0';
-	/*
-	 * Set the fd type based on the path the caller is trying to open.
-	 * /dev/ paths get their own type as to /proc and /sys
-	 */
-	if (local_strncmp("/dev/", path, 5) == 0) {
-		if (local_strncmp("/binder", path + 4, 7) == 0)
-			type = 'B';
-		else
-			type = 'D';
-	} else if (local_strncmp("/proc/", path, 6) == 0) {
-		type = 'K';
-	} else if (local_strncmp("/sys/", path, 5) == 0) {
-		type = 'k';
-	}
-
-	/*
-	 * TODO: theoretically, we should parse /proc/mounts here
-	 *       just in case the caller is accessing something on
-	 *       a network-mounted device, e.g., NFS
-	 */
-
-	return type;
-}
-
-
-static const char fd_types[] = {
-	'B', /* /dev/binder */
-	'D', /* device files (/dev) */
-	'E', /* epoll FD */
-	'F', /* regular file / directory */
-	'K', /* special kernel file (/sys or /proc) */
-	'k', /* special kernel file (/sys or /proc) */
-	'P', /* pipe */
-	'p', /* popen pipe */
-	'S', /* network socket */
-	'U', /* unix domain socket (local) */
-};
-
 struct sockaddr_max {
 	struct sockaddr sa;
 	char d[256];
@@ -148,6 +105,90 @@ static char __get_socktype(int sockfd)
 	return 'S';
 }
 
+static char __get_path_type(const char *path, int fd)
+{
+	char buf[256];
+
+	if (!path)
+		return '\0';
+
+	if (path[0] != '/') {
+		if (local_strncmp("pipe:", path, 5) == 0)
+			return 'P';
+		if (local_strncmp("socket:", path, 7) == 0)
+			return __get_socktype(fd);
+		if (local_strncmp("anon_inode:[eventpoll]", path, 22) == 0)
+			return 'e';
+	}
+
+	/*
+	 * Set the fd type based on the path the caller is trying to open.
+	 * /dev/ paths get their own type as to /proc and /sys
+	 */
+	if (local_strncmp("/dev/", path, 5) == 0) {
+		if (local_strncmp("/binder", path + 4, 7) == 0)
+			return 'B';
+		else
+			return 'D';
+	} else if (local_strncmp("/proc/", path, 6) == 0) {
+		return 'K';
+	} else if (local_strncmp("/sys/", path, 5) == 0) {
+		return 'k';
+	}
+
+	/*
+	 * try a stat call...
+	 */
+	if (libc.stat) {
+		struct stat st;
+		if (libc.stat(path, &st) < 0)
+			goto out;
+		if (S_ISLNK(st.st_mode)) {
+			if (libc.readlink(path, buf, sizeof(buf)) < 0)
+				goto out;
+			/* only support 2-levels of linking */
+			if (libc.stat(buf, &st) < 0)
+				goto out;
+		}
+
+		if (S_ISDIR(st.st_mode))
+			return 'f';
+		else if (S_ISFIFO(st.st_mode))
+			return 'P';
+		else if (S_ISCHR(st.st_mode) || S_ISBLK(st.st_mode))
+			return 'D';
+		else if (S_ISSOCK(st.st_mode))
+			return __get_socktype(fd);
+		else if (S_ISREG(st.st_mode))
+			return 'F';
+	}
+
+out:
+	/*
+	 * TODO: theoretically, we should parse /proc/mounts here
+	 *       just in case the caller is accessing something on
+	 *       a network-mounted device, e.g., NFS
+	 */
+
+	/* default to standard file type */
+	return 'F';
+}
+
+
+static const char fd_types[] = {
+	'B', /* /dev/binder */
+	'D', /* device files (/dev) */
+	'E', /* epoll FD */
+	'F', /* regular file */
+	'f', /* directory */
+	'K', /* special kernel file: /proc */
+	'k', /* special kernel file: /sys */
+	'P', /* pipe */
+	'p', /* popen pipe */
+	'S', /* network socket */
+	'U', /* unix domain socket (local) */
+};
+
 static char __guess_fdtype(int fd)
 {
 	char path[32];
@@ -162,17 +203,7 @@ static char __guess_fdtype(int fd)
 		return '?';
 
 	/* guess a type based on returned path */
-	if (buf[0] != '/') {
-		if (local_strncmp("pipe:", buf, 5) == 0)
-			return 'P';
-		if (local_strncmp("socket:", buf, 7) == 0)
-			return __get_socktype(fd);
-		if (local_strncmp("anon_inode:[eventpoll]", buf, 22) == 0)
-			return 'e';
-		return '?';
-	}
-
-	return __get_path_type(buf);
+	return __get_path_type(buf, fd);
 }
 
 static inline char get_fdtype(int fd)
@@ -342,6 +373,7 @@ void __hidden setup_wrap_cache(void)
 	add_entry("fopen", handle_fopen, 1, 0);
 	add_entry("freopen", handle_fopen, 1, 0);
 	add_entry("open", handle_open, 1, 0);
+	add_entry("opendir", handle_opendir, 1, 0);
 	add_entry("openat", handle_openat, 1, 0);
 	add_entry("pclose", handle_closefptr, 1, 1);
 	add_entry("pipe", handle_pipe, 1, 0);
@@ -832,7 +864,7 @@ int handle_open(struct tls_info *tls)
 				  (int)info->regs[2], (int)info->regs[3])
 		 );
 	if (rval >= 0) {
-		char type = __get_path_type(path);
+		char type = __get_path_type(path, rval);
 		set_fdtype(rval, type);
 		if (info->should_log)
 			bt_printf(tls, "LOG:I:fd(%d,%s)='%c':\n", rval, path, type);
@@ -847,6 +879,44 @@ int handle_open(struct tls_info *tls)
 	return 1;
 }
 
+int handle_opendir(struct tls_info *tls)
+{
+	struct ret_ctx *ret;
+	int err;
+	const char *path;
+	struct log_info *info;
+	DIR *rval;
+	DIR *(*openfunc)(const char *);
+
+	info = &tls->info;
+	if (!info->should_handle)
+		return 0;
+
+	/*
+	 * handles:
+	 * DIR *opendir(const char *dirname);
+	 */
+	path = (const char *)info->regs[0];
+	openfunc = info->func;
+
+	safe_call(info, err,
+		  rval = openfunc(path);
+		 );
+	if (rval != NULL && libc.dirfd) {
+		int dfd = libc.dirfd(rval);
+		set_fdtype(dfd, 'f');
+		if (info->should_log)
+			bt_printf(tls, "LOG:I:fd(%d,%s)='f':\n", dfd, path);
+	}
+
+	ret = get_retmem(NULL);
+	if (!ret)
+		BUG_MSG(0x4312, "No TLS return value!");
+	ret->sym = info->symbol;
+	ret->_errno = err;
+	ret->u.u32[0] = (uint32_t)rval;
+	return 1;
+}
 
 int handle_openat(struct tls_info *tls)
 {
@@ -872,7 +942,7 @@ int handle_openat(struct tls_info *tls)
 		  rval = openfunc((int)info->regs[0], path, (int)info->regs[2])
 		 );
 	if (rval >= 0) {
-		char type = __get_path_type(path);
+		char type = __get_path_type(path, rval);
 		set_fdtype(rval, type);
 		if (info->should_log)
 			bt_printf(tls, "LOG:I:fd(%d,%s)='%c':\n", rval, path, type);
@@ -912,8 +982,8 @@ int handle_fopen(struct tls_info *tls)
 
 	safe_call(info, err, rval = openfunc(path, mode, (void *)info->regs[2]));
 	if (rval) {
-		char type = __get_path_type(path);
 		int fd = libc.fno(rval);
+		char type = __get_path_type(path, fd);
 		set_fdtype(fd, type);
 		if (info->should_log)
 			bt_printf(tls, "LOG:I:fd(%d,%s)='%c':\n", fd, path, type);
