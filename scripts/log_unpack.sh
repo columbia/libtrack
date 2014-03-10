@@ -36,7 +36,7 @@ for i in `ls -1 *.log`; do
     cp $i "${LDIR}/$i"
     echo "copy $i"
 done | wc -l
-)" "uncomplressed files in '${LDIR}'"
+)" "uncompressed files in '${LDIR}'"
 
 SZ=`du -sh d | awk '{print $1}'`
 popd >/dev/null 2> /dev/null
