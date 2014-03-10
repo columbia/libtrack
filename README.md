@@ -4,7 +4,7 @@ systrace
 Library wrapper and system-level tracing utilities
 
 # Usage
---------
+
 The primary interface to the *systrace* utility is the **wraplib.sh** script.
 This script will create a project which can be compiled as an Android or iOS
 library depending on the options.
@@ -28,7 +28,8 @@ use libz.so to compress the logs before writing to disk, and maintains an
 aggressive caching and buffering system that attempts to mitigate the runtime
 impact of logging.
 
-## wraplib.sh usage
+### wraplib.sh usage
+
     Usage: ./wraplib.sh --lib path/to/library 
                               [--wrap-all]
                               [--arch {android|arm|x86}]
@@ -47,19 +48,23 @@ impact of logging.
     Environment variables:
             CROSS_COMPILE                   Used to properly dump ELF objects. Defaults to 'arm-eabi-'
 
-## Examples
+### Examples
 
-### Wrap syscalls in Android libc.so
+#### Wrap syscalls in Android libc.so
 The following command will create a directory named "alibc/libc.so/" which will
 contain an Android project that can be compiled via NDK or AOSP. This project
 will contain all the libc entry points, and will log calls to libc functions
 that invoke system calls.
+
     ./wraplib.sh --lib path/to/libc.so --arch android --out alibc
+
 To make this project build-able using the NDK:
+
     ./wraplib.sh --lib path/to/libc.so --arch android --out alibc --use-ndk
 
-### Wrap all entry points in Android libsqlite.so
+#### Wrap all entry points in Android libsqlite.so
 All entry points to libsqlite will be logged. Output project will be placed in
 "sql/libsqlite.so/" and build-able using the NDK:
+
     ./wraplib.sh --lib path/to/libsqlite.so --wrap-all --arch android --out sql --use-ndk
 
