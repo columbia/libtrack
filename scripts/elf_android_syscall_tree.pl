@@ -13,7 +13,7 @@ my %syscalls;
 my %extra_syscalls;
 my $entrypoint = "";
 
-require "scripts/syscall_filter.pl";
+require "scripts/api_filter.pl";
 my %dowrap = always_wrap();
 my %nowrap = never_wrap();
 my %nowrap_re = never_wrap_re();

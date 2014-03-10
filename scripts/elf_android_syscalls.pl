@@ -6,7 +6,7 @@ my $entrypoint = "";
 my $r7;
 my $r7addr = 0;
 
-require "scripts/syscall_filter.pl";
+require "scripts/api_filter.pl";
 my %dowrap = always_wrap();
 my %nowrap = never_wrap();
 my %nowrap_re = never_wrap_re();
