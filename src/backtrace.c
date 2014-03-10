@@ -404,6 +404,13 @@ static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 			     _UVRSD_UINT32, &frame->sp);
 #endif
 
+	if (state->count > 0) {
+		if (state->frame[state->count - 1].pc == (void *)ip) {
+			/* recursion: skip this frame! */
+			return _URC_NO_REASON;
+		}
+	}
+
 	frame->pc = (void *)ip;
 
 	state->count++;
