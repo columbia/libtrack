@@ -11,6 +11,7 @@
  */
 //#define AGGRESIVE_FLUSHING
 
+#include <dirent.h>
 #include <dlfcn.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -20,6 +21,7 @@
 #include <unwind.h>
 #include <sys/cdefs.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 
 __BEGIN_DECLS
 
@@ -93,6 +95,8 @@ struct libc_iface {
 	int (*fno)(FILE *f);
 	int (*fchmod)(int fd, mode_t mode);
 	int (*access)(const char *path, int amode);
+	int (*stat)(const char *path, struct stat *buf);
+	int (*dirfd)(DIR *dirp);
 
 	pid_t (*getpid)(void);
 	uint32_t (*gettid)(void);

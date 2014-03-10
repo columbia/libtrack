@@ -488,6 +488,8 @@ int __hidden init_libc_iface(struct libc_iface *iface, const char *dso_path)
 	init_sym(iface, 1, fno, fileno);
 	init_sym(iface, 1, fchmod,);
 	init_sym(iface, 1, access,);
+	init_sym(iface, 0, stat,);
+	init_sym(iface, 0, dirfd,);
 	init_sym(iface, 1, getpid,);
 	init_sym(iface, 1, gettid, __thread_selfid);
 	init_sym(iface, 1, nanosleep,);
