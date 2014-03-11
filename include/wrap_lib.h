@@ -162,6 +162,7 @@ struct libc_iface {
 extern struct libc_iface libc;
 
 extern int cached_pid;
+extern int log_timing;
 
 struct tls_info;
 
@@ -185,7 +186,7 @@ extern void libc_close_log(void);
 static inline int should_log(void)
 {
 	int err;
-	char buf[10];
+	char buf[32];
 	FILE *f;
 
 	err = libc.access(ENABLE_LOG_PATH, F_OK);
@@ -198,10 +199,22 @@ static inline int should_log(void)
 	if (!cached_pid &&
 	    (f = libc.fopen(ENABLE_LOG_PATH, "r")) != NULL) {
 		cached_pid = -1;
-		if (libc.fread(buf, sizeof(buf), 1, f) > 0)
+		log_timing = -1;
+		if (libc.fread(buf, 1, sizeof(buf), f) > 0) {
+			char *tptr = buf;
+			while (*tptr && *tptr != ':'
+			       && tptr < buf + sizeof(buf))
+				tptr++;
+			while (*tptr == ':')
+				*tptr++ = '\0';
 			cached_pid = libc.strtol(buf, NULL, 10);
+			if (tptr < buf + sizeof(buf))
+				log_timing = libc.strtol(tptr, NULL, 10);
+		}
 		if (!cached_pid)
 			cached_pid = -1;
+		if (log_timing < 0)
+			log_timing = 0;
 		libc.fclose(f);
 	}
 

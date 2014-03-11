@@ -110,6 +110,7 @@ static int wrapped_text_size =
 #undef SYM
 
 int cached_pid = 0;
+int log_timing = 0;
 
 static Dl_info wrapped_dli;
 static Dl_info dl_dli;
