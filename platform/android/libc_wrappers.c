@@ -49,11 +49,22 @@ static int handle_closefptr(struct tls_info *tls);
 static int handle_rename_fd1(struct tls_info *tls);
 static int handle_epoll(struct tls_info *tls);
 
-#define safe_call(INFO, ERR, CODE...) \
-	__clear_wrapping(); \
-	CODE; \
-	ERR = *__errno(); \
-	__set_wrapping()
+#define safe_call(TLS, ERR, CODE...) \
+	{ \
+		struct timeval tv_start, tv_end; \
+		__clear_wrapping(); \
+		if ((TLS)->info.log_time) \
+			libc.gettimeofday(&tv_start, NULL); \
+		CODE; \
+		if ((TLS)->info.log_time) { \
+			libc.gettimeofday(&tv_end, NULL); \
+			log_posixtime(TLS, (TLS)->info.symbol, \
+				      &tv_start, &tv_end); \
+			(TLS)->info.log_time = 0; \
+		} \
+		ERR = *__errno(); \
+		__set_wrapping(); \
+	}
 
 /*
  * keep a table of valid file descriptors and their types
@@ -402,6 +413,47 @@ void __hidden setup_wrap_cache(void)
 	/* TODO: fdprintf ? */
 	/* TODO: fstatfs ? */
 	/* TODO: mmap ? */
+}
+
+/*
+ * Code taken from:
+ * http://www.gnu.org/software/libc/manual/html_node/Elapsed-Time.html
+ *
+ * result = X - Y
+ */
+static inline int timeval_subtract(struct timeval *result,
+				   struct timeval *x,
+				   struct timeval *y)
+{
+	/* Perform the carry for the later subtraction by updating y. */
+	if (x->tv_usec < y->tv_usec) {
+		int nsec = (y->tv_usec - x->tv_usec) / 1000000 + 1;
+		y->tv_usec -= 1000000 * nsec;
+		y->tv_sec += nsec;
+	}
+	if (x->tv_usec - y->tv_usec > 1000000) {
+		int nsec = (x->tv_usec - y->tv_usec) / 1000000;
+		y->tv_usec += 1000000 * nsec;
+		y->tv_sec -= nsec;
+	}
+
+	/* Compute the time remaining to wait.
+	   tv_usec is certainly positive. */
+	result->tv_sec = x->tv_sec - y->tv_sec;
+	result->tv_usec = x->tv_usec - y->tv_usec;
+
+	/* Return 1 if result is negative. */
+	return x->tv_sec < y->tv_sec;
+}
+
+static inline void log_posixtime(struct tls_info *tls, const char *sym,
+				 struct timeval *tv_start, struct timeval *tv_end)
+{
+	struct timeval posix_time;
+	timeval_subtract(&posix_time, tv_end, tv_start);
+	bt_printf(tls, "LOG:I:%s:posixtime:%lu.%lu\n", sym,
+		  (unsigned long)posix_time.tv_sec,
+		  (unsigned long)posix_time.tv_usec);
 }
 
 /**
@@ -859,7 +911,7 @@ int handle_open(struct tls_info *tls)
 	path = (const char *)info->regs[0];
 	openfunc = info->func;
 
-	safe_call(info, err,
+	safe_call(tls, err,
 		  rval = openfunc(path, (int)info->regs[1],
 				  (int)info->regs[2], (int)info->regs[3])
 		 );
@@ -899,7 +951,7 @@ int handle_opendir(struct tls_info *tls)
 	path = (const char *)info->regs[0];
 	openfunc = info->func;
 
-	safe_call(info, err,
+	safe_call(tls, err,
 		  rval = openfunc(path);
 		 );
 	if (rval != NULL && libc.dirfd) {
@@ -938,7 +990,7 @@ int handle_openat(struct tls_info *tls)
 	path = (const char *)info->regs[1];
 	openfunc = info->func;
 
-	safe_call(info, err,
+	safe_call(tls, err,
 		  rval = openfunc((int)info->regs[0], path, (int)info->regs[2])
 		 );
 	if (rval >= 0) {
@@ -980,7 +1032,7 @@ int handle_fopen(struct tls_info *tls)
 	mode = (const char *)info->regs[1];
 	openfunc = info->func;
 
-	safe_call(info, err, rval = openfunc(path, mode, (void *)info->regs[2]));
+	safe_call(tls, err, rval = openfunc(path, mode, (void *)info->regs[2]));
 	if (rval) {
 		int fd = libc.fno(rval);
 		char type = __get_path_type(path, fd);
@@ -1024,7 +1076,7 @@ int handle_dup(struct tls_info *tls)
 
 	type = get_fdtype(oldfd);
 
-	safe_call(info, err, rval = dupfunc(oldfd, info->regs[1]));
+	safe_call(tls, err, rval = dupfunc(oldfd, info->regs[1]));
 
 	/* we duplicated the fd, so it's the same type as the oldfd */
 	if (rval >= 0) {
@@ -1070,7 +1122,7 @@ int handle_socket(struct tls_info *tls)
 	if (domain == AF_UNIX || domain == AF_LOCAL)
 		type = 'U';
 
-	safe_call(info, err, rval = sockfunc(domain, (int)info->regs[1],
+	safe_call(tls, err, rval = sockfunc(domain, (int)info->regs[1],
 					     (int)info->regs[2], sv));
 	if (rval < 0)
 		goto out;
@@ -1123,7 +1175,7 @@ int handle_pipe(struct tls_info *tls)
 	if (info->symbol[1] == 'i') { /* pipe/pipe2 */
 		int *pfd = (int *)info->regs[0];
 
-		safe_call(info, err, rval = pipefunc(pfd, (int)info->regs[1]));
+		safe_call(tls, err, rval = pipefunc(pfd, (int)info->regs[1]));
 		if (rval == 0 && pfd) {
 			set_fdtype(pfd[0], 'P');
 			set_fdtype(pfd[1], 'P');
@@ -1139,7 +1191,7 @@ int handle_pipe(struct tls_info *tls)
 		flush_and_close(tls);
 		libc.forking = libc.getpid();
 
-		safe_call(info, err,
+		safe_call(tls, err,
 			  f = popenfunc((const char *)info->regs[0],
 					(const char *)info->regs[1])
 			 );
@@ -1185,7 +1237,7 @@ int handle_accept(struct tls_info *tls)
 	acceptfunc = info->func;
 	type = get_fdtype(sockfd);
 
-	safe_call(info, err,
+	safe_call(tls, err,
 		  rval = acceptfunc(sockfd, (void *)info->regs[1],
 				    (void *)info->regs[2])
 		 );
@@ -1503,7 +1555,7 @@ static int __handle_epoll_create(struct tls_info *tls)
 	 */
 	createfunc = info->func;
 
-	safe_call(info, err, epfd = createfunc((int)info->regs[0]));
+	safe_call(tls, err, epfd = createfunc((int)info->regs[0]));
 	if (epfd >= 0) {
 		set_fdtype(epfd, 'E');
 		if (info->should_log)

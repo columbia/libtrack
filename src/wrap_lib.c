@@ -366,7 +366,7 @@ void __hidden __clear_wrapping(void)
 int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 {
 	int did_wrap = 0, _err, parent;
-	struct tls_info *tls;
+	struct tls_info *tls = NULL;
 
 	if (!regs || !stack || !symbol)
 		return 0;
@@ -405,6 +405,7 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 	tls->info.symcache = NULL;
 
 	tls->info.should_log = should_log();
+	tls->info.log_time = log_timing;
 
 	if (tls->info.should_log) {
 		void *f;

@@ -236,6 +236,7 @@ struct log_info {
 	uint32_t *regs;
 	void *stack;
 	struct timeval tv;
+	int log_time;
 
 	uint8_t should_log;
 	uint8_t should_handle;
