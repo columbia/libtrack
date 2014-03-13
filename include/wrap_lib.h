@@ -267,6 +267,7 @@ struct ret_ctx {
 	int _errno;
 	char symmod[MAX_SYMBOL_LEN];
 	const char *sym;
+	struct timeval posix_start;
 };
 
 extern struct ret_ctx *get_retmem(struct tls_info *tls);

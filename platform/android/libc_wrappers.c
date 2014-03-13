@@ -466,18 +466,33 @@ static inline void log_posixtime(struct tls_info *tls, const char *sym,
  */
 uint32_t wrapped_return(void)
 {
-	struct ret_ctx *ret;
-	uint32_t rval, err;
+	/* record this ASAP */
+	struct timeval end_tv;
+	libc.gettimeofday(&end_tv, NULL);
 
-	ret = get_retmem(NULL);
-	if (!ret)
-		BUG_MSG(0x4311, "No TLS return value!");
+	{
+		struct tls_info *tls;
+		struct ret_ctx *ret;
+		uint32_t rval, err = (*__errno());
 
-	err = ret->_errno;
-	rval = ret->u.u32[0];
+		tls = get_tls();
+		ret = get_retmem(tls);
+		if (!ret)
+			BUG_MSG(0x4311, "No TLS return value!");
 
-	(*__errno()) = err;
-	return rval;
+		if (tls->info.log_time) {
+			rval = 0; /* handled by arch_wrapped_return */
+			log_posixtime(tls, ret->sym,
+				      &ret->posix_start, &end_tv);
+			tls->info.log_time = 0;
+		} else {
+			err = ret->_errno;
+			rval = ret->u.u32[0];
+		}
+
+		(*__errno()) = err;
+		return rval;
+	}
 }
 
 /*

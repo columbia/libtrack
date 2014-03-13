@@ -182,6 +182,39 @@ FUNC_LBL(_marg(\pfx,$1)_marg(\sym,$0))
 	.endm
 
 /*
+ * @arch_wrapped_return - handle low-level bits of return value interposition
+ *
+ * This function is invoked upon return from a call into the wrapped library.
+ * We've forced the LR to be here, and stashed the original LR in a TLS slot.
+ * We need to save the return value(s) found in r0-r3, then invoke the
+ * wrapped_return function which will log timing information. We can then
+ * restore the return values, fetch the original LR from TLS and bump the
+ * PC back where it originally came from before calling into this wrapping
+ * library.
+ */
+#ifdef WRAP_RETURN_FUNC
+ENTRY(concat(arch_,WRAP_RETURN_FUNC))
+	/* push return values: r0-r3 */
+	push	{r0-r3}
+	symaddr	ip, _FN(WRAP_RETURN_FUNC)
+	/*
+	 * overhead before gettimeofday: 4 instructions + wrapped_return
+	 * preamble (~3 instructions)
+	 */
+	blx	ip
+	get_wrapping_tls_val ip, r3
+	/*
+	 * reset the TLS slot back to zero
+	 * (otherwise we won't ever log again!)
+	 */
+	mov	r1, #0
+	set_wrapping_tls_val r1, r2, r3
+	pop	{r0-r3}
+	mov	pc, ip
+END(concat(arch_,WRAP_RETURN_FUNC))
+#endif
+
+/*
  * @wrap_func - Create a wrapper entry point for a given symbol
  *
  * Given a symbol, "symname", this macro will create an entry point named
@@ -238,18 +271,33 @@ ENTRY(_marg(\pfx,$2)_marg(\wrapsym,$1))
 	bl	_FN(WRAP_TRACE_FUNC)
 #ifdef WRAP_RETURN_FUNC
 	cmp	r0, #0
-	beq	6f
-	/* If we get here, then the wrapper indicated we're NOT to call
-	 * the original function (perhaps it already has). Restore the
-	 * caller state (including LR) and branch to the WRAP_RETURN
-	 * function.
+	beq	7f
+	bgt	6f  /* >0 == handled function, return through wrapped_return */
+	/*
+	 * If we get here, then the tracing function has returned a negative
+	 * value which indicates that we're to call the original function,
+	 * but return through the wrapped return path
+	 * (usually to measure time).
 	 */
-	symaddr	r5, _FN(WRAP_RETURN_FUNC)
+	/* save the original LR into the wrapping TLS key slot */
+	sub	r8, #4		/* original LR (see save_caller_state) */
+	ldr	ip, [r8]
+	set_wrapping_tls_val ip, r0, r1
+	/* replace original LR with arch_wrapped_return */
+	symaddr ip, _FN(concat(arch_,WRAP_RETURN_FUNC))
+	str	ip, [r8]  /* replace LR: return through arch_wrapped_return! */
+	/*
+	 * overhead between gettimeofday and actual function invocation:
+	 * 20 instructions (including restore_caller_state)
+	 */
+	b	7f /* call the function (return through arch_wrapped_return) */
+
+6:	symaddr	r5, _FN(WRAP_RETURN_FUNC)
 #endif /* WRAP_RETURN_FUNC */
 #endif /* WRAP_TRACE_FUNC */
 	/* restore registers and make the original function call
 	 * (or jump to special return routine) */
-6:	mov	ip, r5
+7:	mov	ip, r5
 	restore_caller_state r4
 	bx	ip
 END(_marg(\pfx,$2)_marg(\wrapsym,$1))

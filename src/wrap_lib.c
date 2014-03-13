@@ -334,7 +334,7 @@ void *wrapped_dlsym(const char *libpath, void **lib_handle, const char *symbol)
 	return sym;
 }
 
-static pthread_key_t s_wrapping_key = (pthread_key_t)(-1);
+pthread_key_t s_wrapping_key = (pthread_key_t)(-1);
 
 int __hidden __set_wrapping(void)
 {
@@ -440,6 +440,16 @@ out:
 	 */
 	if (!did_wrap)
 		(*__errno()) = _err;
+
+	if (tls && tls->info.should_log && tls->info.log_time) {
+		struct ret_ctx *ret = get_retmem(tls);
+		if (!ret)
+			BUG_MSG(0x4312, "No TLS return value!");
+		ret->sym = symbol;
+		/* call the function, but return through wrapped_return */
+		did_wrap = -1;
+		libc.gettimeofday(&ret->posix_start, NULL);
+	}
 
 	return did_wrap;
 }
