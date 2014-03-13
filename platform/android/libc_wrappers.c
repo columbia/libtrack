@@ -451,7 +451,7 @@ static inline void log_posixtime(struct tls_info *tls, const char *sym,
 {
 	struct timeval posix_time;
 	timeval_subtract(&posix_time, tv_end, tv_start);
-	bt_printf(tls, "LOG:I:%s:posixtime:%lu.%lu\n", sym,
+	bt_printf(tls, "LOG:T:%s:%lu.%lu\n", sym,
 		  (unsigned long)posix_time.tv_sec,
 		  (unsigned long)posix_time.tv_usec);
 }
