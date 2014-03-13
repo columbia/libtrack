@@ -100,6 +100,7 @@ STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
 
 /*
  * @symaddr - grab the address of a symbol using PC-relative addressing
+ * (3 instructions)
  *
  * This annoying little macro is needed because Apple's assembler doesn't
  * do handy things like this for you... grrrrr.
@@ -112,15 +113,15 @@ STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
 
 
 /*
- * @get_wrapping_adr - get a thread-local address for (re)storing register state
+ * @get_wrapping_tls_val - get a thread-local address for (re)storing register state
  *
- * puts the address into the 'ip' register
+ * puts the address into the 'reg' register, stomps on 'tmp' register as well
  */
-	MACRO2(get_wrapping_adr, reg, tmp) /* $0 = reg, $1 = tmp */
+	MACRO2(get_wrapping_tls_val, reg, tmp) /* $0 = reg, $1 = tmp */
 	symaddr	_marg(\reg,$0), s_wrapping_key
 	ldr	_marg(\reg,$0), [_marg(\reg,$0)]
 	cmp	_marg(\reg,$0), #0
-	beq	0f
+	ble	0f
 	get_tls _marg(\tmp,$1)
 	/* load: reg = TLS[s_wrapping_key] */
 	ldr	_marg(\reg,$0), [_marg(\tmp,$1), _marg(\reg,$0), lsl #2]
@@ -128,15 +129,16 @@ STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
 	.endm
 
 /*
- * @set_wrapping_adr - set a thread-local address for (re)storing register state
+ * @set_wrapping_tls_val - set a thread-local address for (re)storing register state
+ * (8 instructions)
  *
  * puts the address into the 'ip' register
  */
-	MACRO3(set_wrapping_adr, reg, tmp1, tmp2)
+	MACRO3(set_wrapping_tls_val, reg, tmp1, tmp2)
 	symaddr	_marg(\tmp1,$1), s_wrapping_key
 	ldr	_marg(\tmp1,$1), [_marg(\tmp1,$1)]
 	cmp	_marg(\tmp1,$1), #0
-	blt	1f
+	ble	1f
 	get_tls _marg(\tmp2,$2)
 	/* TLS[s_wrapping_key] = reg */
 	str	_marg(\reg,$0), [_marg(\tmp2,$2), _marg(\tmp1,$1), lsl #2]
