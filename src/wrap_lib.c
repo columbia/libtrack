@@ -445,7 +445,7 @@ out:
 		struct ret_ctx *ret = get_retmem(tls);
 		if (!ret)
 			BUG_MSG(0x4312, "No TLS return value!");
-		ret->sym = symbol;
+		ret->sym = tls->info.symbol;
 		/* call the function, but return through wrapped_return */
 		did_wrap = -1;
 		libc.gettimeofday(&ret->posix_start, NULL);
