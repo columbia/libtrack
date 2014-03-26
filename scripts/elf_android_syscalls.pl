@@ -11,6 +11,22 @@ my %dowrap = always_wrap();
 my %nowrap = never_wrap();
 my %nowrap_re = never_wrap_re();
 
+my $prio = "never";
+
+if ($#ARGV + 1 >= 2) {
+	if ($ARGV[0] eq "-prio") {
+		if ($ARGV[1] eq "1") {
+			$prio = "always";
+		} elsif ($ARGV[1] eq "2") {
+			$prio = "never";
+		} else {
+			die "Invalid -prio option: '$ARGV[1]'";
+		}
+		shift @ARGV;
+		shift @ARGV;
+	}
+}
+
 sub print_syscall {
 	my $inum = shift;
 	my $entry = shift;
@@ -18,9 +34,20 @@ sub print_syscall {
 	my $unparsed = 0;
 	$! = 0;
 
-	if (exists $nowrap{$entry}) { return; }
-	foreach my $re (keys %nowrap_re) {
-		if ($entry =~ m/$re/) { return; }
+	if ($prio eq "never") {
+		if (exists $nowrap{$entry}) { return; }
+		foreach my $re (keys %nowrap_re) {
+			if ($entry =~ m/$re/) { return; }
+		}
+	} elsif ($prio eq "always")  {
+		if (not exists $dowrap{$entry}) {
+			# check the never wrap list b/c it's
+			# not in the always wrap list
+			if (exists $nowrap{$entry}) { return; }
+			foreach my $re (keys %nowrap_re) {
+				if ($entry =~ m/$re/) { return; }
+			}
+		}
 	}
 
 	($num, $unparsed) = strtol($inum);
