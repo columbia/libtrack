@@ -1,8 +1,11 @@
 #
 # The wrapper "white list"
 #
+
+require "scripts/posix_api.pl";
+
 my %_always_wrap = (
-		    "mmap" => 1,
+		    # Android specific routines
 		    "bcopy" => 1,
 		    "bzero" => 1,
 		    "dlmalloc" => 1,
@@ -14,36 +17,46 @@ my %_always_wrap = (
 		    "dlvalloc" => 1,
 		    "dlpvalloc" => 1,
 		    "dlfree" => 1,
-		    "sigaction" => 1,
-		    "fflush" => 1,
-		    "fgetpos" => 1,
-		    "fileno" => 1,
-		    "ftell" => 1,
-		    "ftello" => 1,
 		    "_fwalk" => 1,
 		    "__sflush" => 1,
 		    "__sflush_locked" => 1,
 		    "__sclose" => 1,
-		    "fstatfs" => 1,
 		    "statfs" => 1,
-		    "closedir" => 1,
-		    "getnetbyaddr" => 1,
-		    "getnetbyname" => 1,
-		    "getprotobyname" => 1,
-		    "getprotobynumber" => 1,
-		    "wait" => 1,
+		    "fstatfs" => 1,
 		    "wait3" => 1,
-		    "waitpid" => 1,
 		    "__wait4" => 1,
-		    "fwprintf" => 1,
-		    "wprintf" => 1,
-		    "swprintf" => 1,
-		    "vfwprintf" => 1,
-		    "fwscanf" => 1,
-		    "killpg" => 1,
 );
 
+
 sub always_wrap() {
+	my %h;
+	# POSIX API
+	%h = posix_alg();
+	@_always_wrap{ keys %h } = values %h;
+	%h = posix_arg();
+	@_always_wrap{ keys %h } = values %h;
+	%h = posix_fs();
+	@_always_wrap{ keys %h } = values %h;
+	%h = posix_ipc();
+	@_always_wrap{ keys %h } = values %h;
+	# skip posix_math
+	%h = posix_mem();
+	@_always_wrap{ keys %h } = values %h;
+	%h = posix_misc();
+	@_always_wrap{ keys %h } = values %h;
+	%h = posix_net();
+	@_always_wrap{ keys %h } = values %h;
+	%h = posix_proc();
+	@_always_wrap{ keys %h } = values %h;
+	# skip posix_string
+	%h = posix_term();
+	@_always_wrap{ keys %h } = values %h;
+	%h = posix_thread();
+	@_always_wrap{ keys %h } = values %h;
+	%h = posix_time();
+	@_always_wrap{ keys %h } = values %h;
+	%h = posix_users();
+	@_always_wrap{ keys %h } = values %h;
 	return %_always_wrap;
 }
 
@@ -62,7 +75,8 @@ sub never_wrap_re() {
 }
 
 # explicit symbols
-my %_never_wrap = ( ".plt" => 1,
+my %_never_wrap = (
+		   ".plt" => 1,
 		   "__libc_init" => 1,
 		   "__errno" => 1,
 		   "__aeabi_atexit" => 1,
@@ -97,66 +111,34 @@ my %_never_wrap = ( ".plt" => 1,
 		   "__aeabi_unwind_cpp_pr0" => 1,
 		   "__aeabi_unwind_cpp_pr1" => 1,
 
-		   # memory allocation
-		   "malloc" => 1,
-		   "calloc" => 1,
-		   "realloc" => 1,
-		   "realloc_in_place" => 1,
-		   "memalign" => 1,
-		   "posix_memalign" => 1,
-		   "valloc" => 1,
-		   "pvalloc" => 1,
-		   "free" => 1,
-
-		   # memory manipulation
-		   "memmove" => 1,
-		   "memcpy" => 1,
-		   "memset" => 1,
-		   "memcmp" => 1,
-		   "wmemmove" => 1,
-		   "wmemcpy" => 1,
-		   "wmemset" => 1,
-		   "wmemcmp" => 1,
-
 		   # string operations
-		   "strlen" => 1,
-		   "strnlen" => 1,
-		   "strdup" => 1,
-		   "strchr" => 1,
-		   "strrchr" => 1,
-		   "sprintf" => 1,
-		   "vsprintf" => 1,
-		   "snprintf" => 1,
-		   "vsnprintf" => 1,
 		   "__strncat_chk" => 1,
-		   "sscanf" => 1,
-		   "vscanf" => 1,
-		   "vsscanf" => 1,
 		   "__strcpy_chk" => 1,
 		   "__strncpy_chk" => 1,
 		   "__strlen_chk" => 1,
 		   "__strnlen_chk" => 1,
-		   "__strcpy_chk" => 1,
-		   "__strncpy_chk" => 1,
 		   "__strcat_chk" => 1,
 
-		   # div
+		   # math
 		   "__aeabi_idiv" => 1,
 		   "__aeabi_uidiv" => 1,
-
-		   # rand
-		   "lrand48" => 1,
-
-		   # clock
-		   "clock_gettime" => 1,
 
 		   # pthreads
 		   "pthread_cond_broadcast" => 1,
 		   "pthread_mutex_init" => 1,
+		   "pthread_mutex_destroy" => 1,
 		   "pthread_cond_signal" => 1,
+
+		   # clock
+		   "clock_gettime" => 1,
 );
 
 sub never_wrap() {
+	my %h;
+	%h = posix_string();
+	@_never_wrap{ keys %h } = values %h;
+	%h = posix_math();
+	@_never_wrap{ keys %h } = values %h;
 	return %_never_wrap;
 }
 
