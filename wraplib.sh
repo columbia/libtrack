@@ -34,6 +34,7 @@ fi
 ARCH=android
 
 WRAPALL=0
+WRAPPRIO=2
 LIB=
 LIBDIR=
 LIBTYPE=
@@ -52,6 +53,9 @@ function usage() {
 	echo -e "                          [--use-ndk]"
 	echo -e ""
 	echo -e "\t--wrap-all                      Wrap (trace) all functions in the library"
+	echo -e "\t--wrap-prio [1|2]               1 = \"always wrap\" functions take priority"
+	echo -e "\t                                2 = \"never wrap\" functions take priority"
+	echo -e "\t                                (default: 2)"
 	echo -e "\t--arch {android|arm|x86}        Architecture for syscall wrappers"
 	echo -e "\t--lib path/to/library           Library (or directory of libraries) to search for syscalls"
 	echo -e ""
@@ -75,6 +79,17 @@ while [[ ! -z "$1" ]]; do
 			;;
 		--wrap-all )
 			WRAPALL=1
+			shift
+			;;
+		--wrap-prio )
+			if [ "$2" = "1" -o "$2" = "2" ]; then
+				WRAPPRIO=$2
+			else
+				echo "E:"
+				echo "E: Invalid priority!"
+				echo "E:"
+				usage
+			fi
 			shift
 			;;
 		--arch )
@@ -211,7 +226,7 @@ function extract_syscalls() {
 		echo "E: missing syscall extraction perl script: '$extract_pl'"
 		echo "E:"
 	fi
-	SYSCALLS=( $(cat "$tf_code" | "$extract_pl") )
+	SYSCALLS=( $(cat "$tf_code" | "$extract_pl" -prio ${WRAPPRIO}) )
 	SYSCALLS_SEQ="$(seq 0 $((${#SYSCALLS[@]}-1)))"
 
 	echo -n "" > "$tf_syscalls"
@@ -229,7 +244,7 @@ function extract_syscall_tree() {
 		echo "E: missing syscall extraction perl script: '$extract_pl'"
 		echo "E:"
 	fi
-	SYSCALLS+=( $("$extract_pl" "$tf_code" "$tf_syscalls") )
+	SYSCALLS+=( $("$extract_pl" -prio ${WRAPPRIO} "$tf_code" "$tf_syscalls") )
 	SYSCALLS_SEQ="$(seq 0 $((${#SYSCALLS[@]}-1)))"
 }
 
