@@ -5,6 +5,7 @@
  * Specially handled libc entry points
  *
  */
+#include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
 #include <unistd.h>
@@ -265,6 +266,8 @@ static struct wrap_cache_entry {
 
 	uint8_t wrapsym;  /* should be called from wrap_special */
 	uint8_t modsym;   /* should be called to modify symbol name */
+	uint8_t notrace;
+	uint8_t notime;
 } s_wrap_cache[WRAP_CACHE_SZ];
 
 static inline uint8_t wrap_hash(const char *name)
@@ -275,8 +278,12 @@ static inline uint8_t wrap_hash(const char *name)
 	return v ? v : 0x1; /* disallow empty hash values */
 }
 
-static void add_entry(const char *symname, handler_func handler,
-		      int wrapsym, int modsym)
+#define WF_WRAPSYM  0x1
+#define WF_MODSYM   0x2
+#define WF_NOTRACE  0x4
+#define WF_NOTIME   0x8
+
+static void add_entry(const char *symname, handler_func handler, int flags)
 {
 	uint8_t hidx;
 	struct wrap_cache_entry *entry;
@@ -298,8 +305,10 @@ static void add_entry(const char *symname, handler_func handler,
 
 	entry->name = symname;
 	entry->handler = handler;
-	entry->wrapsym = wrapsym;
-	entry->modsym = modsym;
+	entry->wrapsym = !!(flags & WF_WRAPSYM);
+	entry->modsym = !!(flags & WF_MODSYM);
+	entry->notrace = !!(flags & WF_NOTRACE);
+	entry->notime = !!(flags & WF_NOTIME);
 }
 
 static inline struct wrap_cache_entry *get_cached_sym(struct log_info *info)
@@ -339,76 +348,76 @@ void __hidden setup_wrap_cache(void)
 	libc.memset(&s_wrap_cache, 0, sizeof(s_wrap_cache));
 
 	/* setup all known functions we want to wrap */
-	add_entry("__fork", handle_fork, 1, 0);
-	add_entry("__bionic_clone", handle_fork, 1, 0);
-	add_entry("__sys_clone", handle_fork, 1, 0);
-	add_entry("__pthread_clone", handle_pthread, 1, 0);
-	add_entry("_exit", handle_exit, 1, 0);
-	add_entry("_exit_thread", handle_thread_exit, 1, 0);
-	add_entry("_exit_with_stack_teardown", handle_thread_exit, 1, 0);
-	add_entry("bsd_signal", handle_signal, 1, 0);
-	add_entry("clone", handle_fork, 1, 0);
-	add_entry("daemon", handle_fork, 1, 0);
-	add_entry("exit", handle_exit, 1, 0);
-	add_entry("exec", handle_exec, 1, 0);
-	add_entry("execl", handle_exec, 1, 0);
-	add_entry("execle", handle_exec, 1, 0);
-	add_entry("execlp", handle_exec, 1, 0);
-	add_entry("execve", handle_exec, 1, 0);
-	add_entry("execvp", handle_exec, 1, 0);
-	add_entry("fork", handle_fork, 1, 0);
-	add_entry("prctl", handle_prctl, 1, 0);
-	add_entry("pthread_create", handle_pthread, 1, 0);
-	add_entry("pthread_exit", handle_thread_exit, 1, 0);
-	add_entry("pthread_setname_np", handle_pth_setname, 1, 0);
-	add_entry("sig_action", handle_sigaction, 1, 0);
-	add_entry("signal", handle_signal, 1, 0);
-	add_entry("system", handle_fork, 1, 0);
-	add_entry("sysv_signal", handle_signal, 1, 0);
-	add_entry("vfork", handle_fork, 1, 0);
+	add_entry("__fork", handle_fork, WF_WRAPSYM);
+	add_entry("__bionic_clone", handle_fork, WF_WRAPSYM);
+	add_entry("__sys_clone", handle_fork, WF_WRAPSYM);
+	add_entry("__pthread_clone", handle_pthread, WF_WRAPSYM);
+	add_entry("_exit", handle_exit, WF_WRAPSYM);
+	add_entry("_exit_thread", handle_thread_exit, WF_WRAPSYM);
+	add_entry("_exit_with_stack_teardown", handle_thread_exit, WF_WRAPSYM);
+	add_entry("bsd_signal", handle_signal, WF_WRAPSYM);
+	add_entry("clone", handle_fork, WF_WRAPSYM);
+	add_entry("daemon", handle_fork, WF_WRAPSYM);
+	add_entry("exit", handle_exit, WF_WRAPSYM);
+	add_entry("exec", handle_exec, WF_WRAPSYM);
+	add_entry("execl", handle_exec, WF_WRAPSYM);
+	add_entry("execle", handle_exec, WF_WRAPSYM);
+	add_entry("execlp", handle_exec, WF_WRAPSYM);
+	add_entry("execve", handle_exec, WF_WRAPSYM);
+	add_entry("execvp", handle_exec, WF_WRAPSYM);
+	add_entry("fork", handle_fork, WF_WRAPSYM);
+	add_entry("prctl", handle_prctl, WF_WRAPSYM);
+	add_entry("pthread_create", handle_pthread, WF_WRAPSYM);
+	add_entry("pthread_exit", handle_thread_exit, WF_WRAPSYM);
+	add_entry("pthread_setname_np", handle_pth_setname, WF_WRAPSYM);
+	add_entry("sig_action", handle_sigaction, WF_WRAPSYM);
+	add_entry("signal", handle_signal, WF_WRAPSYM);
+	add_entry("system", handle_fork, WF_WRAPSYM);
+	add_entry("sysv_signal", handle_signal, WF_WRAPSYM);
+	add_entry("vfork", handle_fork, WF_WRAPSYM);
 
 	/*
 	 * functions on which we dynamically interpose
 	 * (to intercept the returned results)
 	 */
-	add_entry("__open", handle_open, 1, 0);
-	add_entry("__openat", handle_openat, 1, 0);
-	add_entry("__sclose", handle_closefptr, 1, 1);
-	add_entry("accept", handle_accept, 1, 0);
-	add_entry("close", handle_closefd, 1, 1);
-	add_entry("dup", handle_dup, 1, 0);
-	add_entry("dup2", handle_dup, 1, 0);
-	add_entry("epoll_create", handle_epoll, 1, 0);
-	add_entry("epoll_ctl", handle_epoll, 1, 0);
-	add_entry("fclose", handle_closefptr, 1, 1);
-	add_entry("fopen", handle_fopen, 1, 0);
-	add_entry("freopen", handle_fopen, 1, 0);
-	add_entry("open", handle_open, 1, 0);
-	add_entry("opendir", handle_opendir, 1, 0);
-	add_entry("openat", handle_openat, 1, 0);
-	add_entry("pclose", handle_closefptr, 1, 1);
-	add_entry("pipe", handle_pipe, 1, 0);
-	add_entry("pipe2", handle_pipe, 1, 0);
-	add_entry("popen", handle_pipe, 1, 0);
-	add_entry("socket", handle_socket, 1, 0);
-	add_entry("socketpair", handle_socket, 1, 0);
+	add_entry("__open", handle_open, WF_WRAPSYM);
+	add_entry("__openat", handle_openat, WF_WRAPSYM);
+	add_entry("__sclose", handle_closefptr, WF_WRAPSYM | WF_MODSYM);
+	add_entry("accept", handle_accept, WF_WRAPSYM);
+	add_entry("close", handle_closefd, WF_WRAPSYM | WF_MODSYM);
+	add_entry("dup", handle_dup, WF_WRAPSYM);
+	add_entry("dup2", handle_dup, WF_WRAPSYM);
+	add_entry("epoll_create", handle_epoll, WF_WRAPSYM);
+	add_entry("epoll_ctl", handle_epoll, WF_WRAPSYM);
+	add_entry("fclose", handle_closefptr, WF_WRAPSYM | WF_MODSYM);
+	add_entry("fopen", handle_fopen, WF_WRAPSYM);
+	add_entry("freopen", handle_fopen, WF_WRAPSYM);
+	add_entry("open", handle_open, WF_WRAPSYM);
+	add_entry("opendir", handle_opendir, WF_WRAPSYM);
+	add_entry("openat", handle_openat, WF_WRAPSYM);
+	add_entry("pclose", handle_closefptr, WF_WRAPSYM | WF_MODSYM);
+	add_entry("pipe", handle_pipe, WF_WRAPSYM);
+	add_entry("pipe2", handle_pipe, WF_WRAPSYM);
+	add_entry("popen", handle_pipe, WF_WRAPSYM);
+	add_entry("socket", handle_socket, WF_WRAPSYM);
+	add_entry("socketpair", handle_socket, WF_WRAPSYM);
 
 	/* setup functions we want to dynamically rename in the BT */
-	add_entry("epoll_wait", handle_epoll, 0, 1);
-	add_entry("read", handle_rename_fd1, 1, 1);
-	add_entry("readv", handle_rename_fd1, 1, 1);
-	add_entry("pread", handle_rename_fd1, 1, 1);
-	add_entry("pread64", handle_rename_fd1, 1, 1);
-	add_entry("write", handle_rename_fd1, 1, 1);
-	add_entry("writev", handle_rename_fd1, 1, 1);
-	add_entry("pwrite", handle_rename_fd1, 1, 1);
-	add_entry("pwrite64", handle_rename_fd1, 1, 1);
-	add_entry("ioctl", handle_rename_fd1, 1, 1);
-	add_entry("__ioctl", handle_rename_fd1, 1, 1);
-	add_entry("fcntl", handle_rename_fd1, 1, 1);
-	add_entry("__fcntl", handle_rename_fd1, 1, 1);
-	add_entry("__fcntl64", handle_rename_fd1, 1, 1);
-	add_entry("fstat", handle_rename_fd1, 1, 1);
+	add_entry("epoll_wait", handle_epoll, WF_MODSYM);
+	add_entry("read", handle_rename_fd1, WF_WRAPSYM | WF_MODSYM);
+	add_entry("readv", handle_rename_fd1, WF_WRAPSYM | WF_MODSYM);
+	add_entry("pread", handle_rename_fd1, WF_WRAPSYM | WF_MODSYM);
+	add_entry("pread64", handle_rename_fd1, WF_WRAPSYM | WF_MODSYM);
+	add_entry("write", handle_rename_fd1, WF_WRAPSYM | WF_MODSYM);
+	add_entry("writev", handle_rename_fd1, WF_WRAPSYM | WF_MODSYM);
+	add_entry("pwrite", handle_rename_fd1, WF_WRAPSYM | WF_MODSYM);
+	add_entry("pwrite64", handle_rename_fd1, WF_WRAPSYM | WF_MODSYM);
+	add_entry("ioctl", handle_rename_fd1, WF_WRAPSYM | WF_MODSYM);
+	add_entry("__ioctl", handle_rename_fd1, WF_WRAPSYM | WF_MODSYM);
+	add_entry("fcntl", handle_rename_fd1, WF_WRAPSYM | WF_MODSYM);
+	add_entry("__fcntl", handle_rename_fd1, WF_WRAPSYM | WF_MODSYM);
+	add_entry("__fcntl64", handle_rename_fd1, WF_WRAPSYM | WF_MODSYM);
+	add_entry("fstat", handle_rename_fd1, WF_WRAPSYM | WF_MODSYM);
 	/* TODO: select? */
 	/* TODO: fdprintf ? */
 	/* TODO: fstatfs ? */
