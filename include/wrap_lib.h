@@ -25,6 +25,15 @@
 
 __BEGIN_DECLS
 
+/* easily export / hide all non-wrapped functionality */
+#ifdef EXPORT_ALL_SYMS
+#define _static
+#define __hidden
+#else
+#define _static static
+#define __hidden __attribute__((visibility("hidden")))
+#endif
+
 #include "libz.h"
 
 #define ___str(x) #x
@@ -36,8 +45,6 @@ __BEGIN_DECLS
 	const typeof( ((type *)0)->member ) *__mptr = (ptr);	\
 	(type *)( (char *)__mptr - offsetof(type,member) );})
 #endif
-
-#define __hidden __attribute__((visibility("hidden")))
 
 #define ARRAY_SZ(arr) \
 	(sizeof(arr) / sizeof((arr)[0]))

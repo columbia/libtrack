@@ -31,15 +31,15 @@ extern void wrap_symbol_mod(struct tls_info *tls);
 #define TLS_LOGBUF_SZ (LOG_BUFFER_SIZE \
 		       + (4 * sizeof(int)) \
 		       + (MAX_BT_FRAMES * sizeof(void *)))
-static char main_logbuffer[TLS_LOGBUF_SZ];
+_static char main_logbuffer[TLS_LOGBUF_SZ];
 
-static struct bt_line_cache main_btcache;
+_static struct bt_line_cache main_btcache;
 
 
 /*
  * TODO: add some locking, and make the cache global!
  */
-static struct bt_line_cache *get_bt_line_cache(void)
+_static struct bt_line_cache *get_bt_line_cache(void)
 {
 	struct tls_info *tls;
 	struct bt_line_cache *cache;
@@ -118,7 +118,7 @@ struct bt_line __hidden
 	return &l[1];
 }
 
-static int bt_setup_logbuffer(struct tls_info *tls, struct log_info *info)
+_static int bt_setup_logbuffer(struct tls_info *tls, struct log_info *info)
 {
 	char *buf;
 
@@ -204,7 +204,7 @@ void __hidden tls_release_logbuffer(struct tls_info *tls)
 	tls->info.last_stack = NULL;
 }
 
-static inline void print_info(struct tls_info *tls, int count, void *sym)
+_static void print_info(struct tls_info *tls, int count, void *sym)
 {
 	unsigned long ofst;
 	char c;
@@ -292,7 +292,7 @@ do_lookup:
 		    c, ofst, dli.dli_fname, dli.dli_fbase);
 }
 
-static void print_bt_state(struct tls_info *tls, struct bt_state *state)
+_static void print_bt_state(struct tls_info *tls, struct bt_state *state)
 {
 	int count;
 	struct bt_frame *frame;
@@ -318,7 +318,7 @@ static void print_bt_state(struct tls_info *tls, struct bt_state *state)
 	/* bt_printf(tls, "BT:END:"); */
 }
 
-static void __attribute__((noinline))
+_static void __attribute__((noinline))
 std_backtrace(struct tls_info *tls)
 {
 	struct bt_state state;
@@ -340,7 +340,7 @@ std_backtrace(struct tls_info *tls)
 }
 
 #ifdef __arm__
-static inline uintptr_t __Unwind_GetIP(__unwind_context *ctx)
+_static inline uintptr_t __Unwind_GetIP(__unwind_context *ctx)
 {
 	uint32_t val;
 	if (!libc._Unwind_VRS_Get)
@@ -359,7 +359,7 @@ static inline uintptr_t __Unwind_GetIP(__unwind_context *ctx)
  * 	bionic/libc/bionic/debug_stacktrace.cpp
  *
  */
-static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
+_static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 {
 	struct bt_state *state = (struct bt_state *)arg;
 	struct bt_frame *frame;
@@ -420,7 +420,7 @@ static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 	return _URC_NO_REASON;
 }
 
-static inline int is_same_stack(struct bt_frame *current, void **last, int count)
+_static inline int is_same_stack(struct bt_frame *current, void **last, int count)
 {
 	int i;
 	for (i = 0; i < count; i++) {
@@ -431,7 +431,7 @@ static inline int is_same_stack(struct bt_frame *current, void **last, int count
 }
 
 
-static void __attribute__((noinline))
+_static void __attribute__((noinline))
 unwind_backtrace(struct tls_info *tls)
 {
 	Dl_info dli;
