@@ -70,11 +70,11 @@ extern struct bt_line *bt_cache_fetch(void *sym, struct bt_line_cache **cache_ou
 
 extern void log_backtrace(struct tls_info *tls);
 
-#define __bt_logpos(buf) \
-	((int *)(buf))
-
 #define __bt_logbuf(buf) \
-	((char *)((char *)(buf) + sizeof(int)))
+	((char *)(buf))
+
+#define __bt_logpos(buf) \
+	((int *)((char *)(buf) + LOG_BUFFER_SIZE))
 
 #define __bt_last_stack_depth(buf) \
 	((int *)((char *)(buf) + (sizeof(int)) + LOG_BUFFER_SIZE))
