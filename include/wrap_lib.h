@@ -376,11 +376,10 @@ extern struct ret_ctx *get_retmem(struct tls_info *tls);
 		if (!(____tls) || !((____tls)->info.log_pos)) \
 			break; \
 		__log_pos = (____tls)->info.log_pos; \
-		__remain = LOG_BUFFER_SIZE - *__log_pos - sizeof(int) - 1; \
+		__remain = LOG_BUFFER_SIZE - *__log_pos - 1; \
 		if (__remain <= 1) { \
 			bt_flush(____tls, &(____tls)->info); \
-			__remain = LOG_BUFFER_SIZE - *__log_pos \
-				   - sizeof(int) - 1; \
+			__remain = LOG_BUFFER_SIZE - *__log_pos - 1; \
 		} \
 		__len = libc.snprintf((____tls)->info.log_buffer + *__log_pos, \
 				      __remain, fmt, ## __VA_ARGS__ ); \
@@ -389,6 +388,7 @@ extern struct ret_ctx *get_retmem(struct tls_info *tls);
 				/* the line is just too long... */ \
 				*__log_pos += __remain; \
 				bt_flush(____tls, &(____tls)->info); \
+				log_flush((____tls)->logfile); \
 				log_print((____tls)->logfile, LOG, "E:TRUNCATED!"); \
 				break; \
 			} \
