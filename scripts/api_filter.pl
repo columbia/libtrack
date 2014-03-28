@@ -118,16 +118,32 @@ my %_never_wrap = (
 		   "__strlen_chk" => 1,
 		   "__strnlen_chk" => 1,
 		   "__strcat_chk" => 1,
+		   "__sprintf_chk" => 1,
+		   "__strchr_chk" => 1,
+		   "__strrchr_chk" => 1,
 
 		   # math
 		   "__aeabi_idiv" => 1,
 		   "__aeabi_uidiv" => 1,
 
-		   # pthreads
-		   "pthread_cond_broadcast" => 1,
-		   "pthread_mutex_init" => 1,
-		   "pthread_mutex_destroy" => 1,
-		   "pthread_cond_signal" => 1,
+		   # pthread functions that can be expensive
+		   # (to be removed)
+		   "pthread_self" => 1,
+		   "pthread_getspecific" => 1,
+		   "pthread_setspecific" => 1,
+
+		   # memory allocation functions
+		   # (to be removed)
+		   "memset" => 1,
+		   "memcpy" => 1,
+		   "free" => 1,
+		   "malloc" => 1,
+		   "calloc" => 1,
+		   "memcmp" => 1,
+		   "memmove" => 1,
+		   "realloc" => 1,
+		   "__memcpy_chk" => 1,
+		   "__memmove_chk" => 1,
 
 		   # clock
 		   "clock_gettime" => 1,
