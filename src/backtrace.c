@@ -371,6 +371,8 @@ _static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 		state->nskip++;
 		return _URC_NO_REASON;
 	}
+	if (state->count >= MAX_BT_FRAMES)
+		return _URC_END_OF_STACK;
 
 	frame = &state->frame[state->count];
 
@@ -406,6 +408,12 @@ _static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 
 	if (state->count > 0) {
 		if (state->frame[state->count - 1].pc == (void *)ip) {
+			/* don't continue indefinitely! */
+			if (++(state->recursion) > MAX_RECURSIVE_DEPTH) {
+				frame->pc = (void *)-1;
+				state->count++;
+				return _URC_END_OF_STACK;
+			}
 			/* recursion: skip this frame! */
 			return _URC_NO_REASON;
 		}
@@ -413,6 +421,7 @@ _static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 
 	frame->pc = (void *)ip;
 
+	state->recursion = 0;
 	state->count++;
 
 	if (state->count >= MAX_BT_FRAMES)
