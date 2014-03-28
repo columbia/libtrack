@@ -23,9 +23,9 @@ extern void setup_wrap_cache(void);
 #ifdef HAVE_WRAP_SPECIAL
 extern int wrap_special(struct tls_info *tls);
 #else
-static inline int wrap_special(struct tls_info *tls)
+_static inline int wrap_special(struct tls_info *tls)
 {
-	(void)info;
+	(void)tls;
 	return 0;
 }
 #endif
@@ -214,7 +214,7 @@ _static void ___open_log(struct tls_info *tls, int acquire_new, void **logf)
 	if (logf)
 		*logf = NULL;
 
-	if (!tls)
+	if (!tls || libc.dso == (void *)1)
 		return;
 	if (!libc.dso) {
 		if (init_libc_iface(&libc, LIBC_PATH) < 0)
@@ -233,8 +233,12 @@ _static void ___open_log(struct tls_info *tls, int acquire_new, void **logf)
 				f = (void *)__open_stdlogfile(tls);
 				log_print(f, LOG, "E:Failed to open libz!");
 			}
-		} else
+		} else {
 			f = (void *)__open_stdlogfile(tls);
+		}
+
+		if (!f)
+			return; /* can't open log file! */
 
 		tls->logfile = f;
 		log_print(f, LOG, "BEGIN(%s)", wsym(tls));
@@ -302,9 +306,8 @@ void __hidden libc_close_log(void)
 	struct tls_info *tls;
 
 	tls = peek_tls();
-	if (!tls || !tls->logfile)
+	if (!tls)
 		return;
-
 	tls_release_logfile(tls);
 }
 
@@ -371,7 +374,7 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 	int did_wrap = 0, _err, parent;
 	struct tls_info *tls = NULL;
 
-	if (!regs || !stack || !symbol)
+	if (!regs || !stack || !symbol || libc.dso == (void *)1)
 		return 0;
 
 	_err = *__errno();
@@ -460,6 +463,8 @@ out:
 int __hidden init_libc_iface(struct libc_iface *iface, const char *dso_path)
 {
 	if (!iface->dso) {
+		/* guard against recursive calls from library initializers */
+		iface->dso = (void *)1;
 		iface->dso = dlopen(dso_path, RTLD_NOW | RTLD_LOCAL);
 		if (!iface->dso)
 			_BUG(0x40);
