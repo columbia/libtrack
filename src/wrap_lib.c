@@ -78,7 +78,7 @@ struct libc_iface libc __hidden;
 #define TEXT_SIZE(size)
 #define SAVED(addr,name) #name
 #define SYM(addr,name)
-static const char *wrapped_sym=
+_static const char *wrapped_sym=
 #include "real_syms.h"
 ;
 #undef TEXT_SIZE
@@ -102,7 +102,7 @@ struct symbol {
 #define TEXT_SIZE(size) size
 #define SAVED(addr,name)
 #define SYM(addr,name)
-static int wrapped_text_size =
+_static int wrapped_text_size =
 #include "real_syms.h"
 ;
 #undef TEXT_SIZE
@@ -112,13 +112,16 @@ static int wrapped_text_size =
 int cached_pid = 0;
 int log_timing = 0;
 
-static Dl_info wrapped_dli;
-static Dl_info dl_dli;
+_static Dl_info wrapped_dli;
+_static Dl_info dl_dli;
+
+_static unsigned long *addr_blacklist = NULL;
+_static int blacklist_sz = 0;
 
 /*
  * Is the given address within the TEXT section of our wrapped library?
  */
-static int is_in_wrapped_text(unsigned long addr)
+_static int is_in_wrapped_text(unsigned long addr)
 {
 	unsigned long start, end;
 
@@ -135,7 +138,7 @@ static int is_in_wrapped_text(unsigned long addr)
  * given DSO handle.
  *
  */
-static void *table_dlsym(void *dso, const char *sym, int allow_null)
+_static void *table_dlsym(void *dso, const char *sym, int allow_null)
 {
 	struct symbol *symbol;
 
@@ -163,7 +166,7 @@ static void *table_dlsym(void *dso, const char *sym, int allow_null)
 	return (void *)((char *)wrapped_dli.dli_fbase + symbol->offset);
 }
 
-static inline FILE *__open_stdlogfile(struct tls_info *tls)
+_static inline FILE *__open_stdlogfile(struct tls_info *tls)
 {
 	FILE *logf;
 	char *buf = &(tls->logname[0]);
@@ -179,7 +182,7 @@ static inline FILE *__open_stdlogfile(struct tls_info *tls)
 	return logf;
 }
 
-static inline struct gzFile *__open_gzlogfile(struct tls_info *tls)
+_static inline struct gzFile *__open_gzlogfile(struct tls_info *tls)
 {
 	FILE *logf;
 	struct gzFile *gzlogf;
@@ -204,7 +207,7 @@ static inline struct gzFile *__open_gzlogfile(struct tls_info *tls)
 	return gzlogf;
 }
 
-static void ___open_log(struct tls_info *tls, int acquire_new, void **logf)
+_static void ___open_log(struct tls_info *tls, int acquire_new, void **logf)
 {
 	void *f;
 
@@ -242,7 +245,7 @@ static void ___open_log(struct tls_info *tls, int acquire_new, void **logf)
 		*logf = f;
 }
 
-static void *___get_log(int release, int acquire_new)
+_static void *___get_log(int release, int acquire_new)
 {
 	struct tls_info *tls;
 	void *f = NULL;
