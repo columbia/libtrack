@@ -422,6 +422,22 @@ void __hidden setup_wrap_cache(void)
 	/* TODO: fdprintf ? */
 	/* TODO: fstatfs ? */
 	/* TODO: mmap ? */
+
+	/* functions that we don't want to backtrace */
+	add_entry("memset", NULL, WF_NOTRACE | WF_NOTIME);
+	add_entry("memcpy", NULL, WF_NOTRACE | WF_NOTIME);
+	add_entry("memcmp", NULL, WF_NOTRACE | WF_NOTIME);
+	add_entry("memmove", NULL, WF_NOTRACE | WF_NOTIME);
+	add_entry("malloc", NULL, WF_NOTRACE);
+	add_entry("realloc", NULL, WF_NOTRACE);
+	add_entry("calloc", NULL, WF_NOTRACE);
+	add_entry("free", NULL, WF_NOTRACE | WF_NOTIME);
+	add_entry("__memcpy_chk", NULL, WF_NOTRACE | WF_NOTIME);
+	add_entry("__memmove_chk", NULL, WF_NOTRACE | WF_NOTIME);
+	add_entry("pthread_getspecific", NULL, WF_NOTRACE | WF_NOTIME);
+	add_entry("pthread_setspecific", NULL, WF_NOTRACE | WF_NOTIME);
+	add_entry("pthread_self", NULL, WF_NOTRACE | WF_NOTIME);
+	add_entry("clock_gettime", NULL, WF_NOTRACE | WF_NOTIME);
 }
 
 /*
@@ -522,6 +538,32 @@ void __hidden wrap_symbol_mod(struct tls_info *tls)
 		(void)e->handler(tls);
 		tls->info.should_mod_sym = 0;
 	}
+}
+
+/**
+ * @wrap_symbol_notrace
+ *
+ */
+int __hidden wrap_symbol_notrace(struct tls_info *tls)
+{
+	struct wrap_cache_entry *e;
+	e = get_cached_sym(&tls->info);
+	if (e)
+		return e->notrace;
+	return 0;
+}
+
+/**
+ * @wrap_symbol_notime
+ *
+ */
+int __hidden wrap_symbol_notime(struct tls_info *tls)
+{
+	struct wrap_cache_entry *e;
+	e = get_cached_sym(&tls->info);
+	if (e)
+		return e->notime;
+	return 0;
 }
 
 /**

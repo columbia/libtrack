@@ -128,25 +128,25 @@ my %_never_wrap = (
 
 		   # pthread functions that can be expensive
 		   # (to be removed)
-		   "pthread_self" => 1,
-		   "pthread_getspecific" => 1,
-		   "pthread_setspecific" => 1,
+		   #"pthread_self" => 1,
+		   #"pthread_getspecific" => 1,
+		   #"pthread_setspecific" => 1,
 
 		   # memory allocation functions
 		   # (to be removed)
-		   "memset" => 1,
-		   "memcpy" => 1,
-		   "free" => 1,
-		   "malloc" => 1,
-		   "calloc" => 1,
-		   "memcmp" => 1,
-		   "memmove" => 1,
-		   "realloc" => 1,
-		   "__memcpy_chk" => 1,
-		   "__memmove_chk" => 1,
+		   #"memset" => 1,
+		   #"memcpy" => 1,
+		   #"free" => 1,
+		   #"malloc" => 1,
+		   #"calloc" => 1,
+		   #"memcmp" => 1,
+		   #"memmove" => 1,
+		   #"realloc" => 1,
+		   #"__memcpy_chk" => 1,
+		   #"__memmove_chk" => 1,
 
 		   # clock
-		   "clock_gettime" => 1,
+		   #"clock_gettime" => 1,
 );
 
 sub never_wrap() {

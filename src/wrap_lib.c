@@ -22,8 +22,20 @@ extern void setup_wrap_cache(void);
 /* lib-specific wrapping handlers (e.g. [v]fork in libc) */
 #ifdef HAVE_WRAP_SPECIAL
 extern int wrap_special(struct tls_info *tls);
+extern int wrap_symbol_notrace(struct tls_info *tls);
+extern int wrap_symbol_notime(struct tls_info *tls);
 #else
 _static inline int wrap_special(struct tls_info *tls)
+{
+	(void)tls;
+	return 0;
+}
+_static inline int wrap_symbol_notrace(struct tls_info *tls)
+{
+	(void)tls;
+	return 0;
+}
+_static inline int wrap_symbol_notime(struct tls_info *tls)
 {
 	(void)tls;
 	return 0;
@@ -424,7 +436,13 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 			log_print(f, LOG, "I:FORKED:parent=%d:", parent);
 			log_flush(f);
 		}
-		log_backtrace(tls);
+		if (wrap_symbol_notrace(tls)) /* don't do a backtrace */
+			bt_printf(tls, "CALL:%s\n", symbol);
+		else
+			log_backtrace(tls);
+
+		if (wrap_symbol_notime(tls))
+			tls->info.log_time = 0;
 	} else if (tls->logfile) {
 		/*
 		 * We get here is we're not logging, but we have a logfile
