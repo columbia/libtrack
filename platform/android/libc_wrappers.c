@@ -507,7 +507,7 @@ void __hidden wrap_symbol_mod(struct tls_info *tls)
 
 	e = get_cached_sym(&tls->info);
 
-	if (e && e->modsym) {
+	if (e && e->modsym && e->handler) {
 		tls->info.should_mod_sym = 1;
 		tls->info.should_handle = 0;
 		(void)e->handler(tls);
@@ -531,7 +531,7 @@ int __hidden wrap_special(struct tls_info *tls)
 {
 	struct wrap_cache_entry *e;
 
-	if (!wsym(tls))
+	if (!tls || !wsym(tls))
 		return 0;
 
 	e = get_cached_sym(&tls->info);
