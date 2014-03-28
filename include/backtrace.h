@@ -12,6 +12,7 @@
 #include "wrap_tls.h"
 
 #define MAX_BT_FRAMES 128
+#define MAX_RECURSIVE_DEPTH 1024
 #define MAX_LINE_LEN  256
 
 struct bt_frame {
@@ -26,11 +27,12 @@ struct bt_frame {
 struct dvm_bt;
 
 struct bt_state {
-	struct bt_frame frame[MAX_BT_FRAMES];
 	int count;
+	int recursion;
 	int nskip;
-	struct dvm_bt *dvm_bt;
 	void *f;
+	struct dvm_bt *dvm_bt;
+	struct bt_frame frame[MAX_BT_FRAMES];
 };
 
 struct bt_line {
