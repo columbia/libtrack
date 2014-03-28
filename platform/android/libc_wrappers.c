@@ -14,10 +14,10 @@
 #include <sys/types.h>
 
 #include "backtrace.h"
-#include "java_backtrace.h"
 #include "libz.h"
 #include "wrap_lib.h"
 #include "wrap_tls.h"
+#include "java_backtrace.h"
 
 extern int local_strcmp(const char *s1, const char *s2);
 extern int local_strncmp(const char *s1, const char *s2, size_t n);
