@@ -226,13 +226,21 @@ do_dvm_bt:
 		struct Thread *self;
 		uint32_t *fp = NULL;
 		char *tname;
+		struct Method **mlist;
 		int r;
 
 		self = dvm->dvmThreadSelf();
 		if (!self)
 			return;
 		fp = self->interpSave.curFrame;
+		if (!fp)
+			return;
 
+		/*
+		 * There is a bug in dvmGetThreadName() that causes this
+		 * to crash when we call it before the thread has a
+		 * Java/Dalvik name, but after a Java function has been
+		 * invoked. This happens primarily at system boot...
 		tname = tls->dvm_threadname;
 		if (!tname[0]) {
 			int len;
@@ -243,12 +251,38 @@ do_dvm_bt:
 			libc.memcpy(tname, nm.c_str(), len);
 			libc_log("I:DalvikThreadName:%s:", tname);
 		}
+		*/
 
+		mlist = dvm_bt->mlist;
 		dvm_bt->count = dvm->dvmComputeExactFrameDepth(fp);
-		if (dvm_bt->count > MAX_BT_FRAMES)
+		if (dvm_bt->count > MAX_BT_FRAMES) {
+			/*
+			 * we need an array big enough for this frame
+			 * because the dvm fill stack array function
+			 * doesn't care how big our array really is...
+			 */
+			mlist = libc.malloc((dvm_bt->count + 1) * sizeof(struct Method *));
+			if (!mlist) {
+				dvm_bt->count = 0;
+				return;
+			}
 			dvm_bt->count = MAX_BT_FRAMES;
+		}
 
-		dvm->dvmFillStackTraceArray(fp, dvm_bt->mlist, dvm_bt->count);
+		/*
+		 * Grrr. This API doesn't respect the 'length' parameter.
+		 * It just sends out an error message (if you're lucky enough
+		 * to have copiled without NDEBUG), and continues to mash on
+		 * your memory even though it's out of bounds...
+		 */
+		dvm->dvmFillStackTraceArray(fp, mlist, dvm_bt->count);
+
+		if (mlist != dvm_bt->mlist) {
+			/* copy only the portion of data back that fits */
+			libc.memcpy(dvm_bt->mlist, mlist,
+				    dvm_bt->count * sizeof(struct Method *));
+			libc.free(mlist);
+		}
 	}
 
 	return;
