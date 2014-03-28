@@ -124,7 +124,7 @@ struct dvm_iface {
 	void *dso;
 	int valid;
 
-	void *dvmCallMethodSym[3][2];
+	void *dvmCallMethodSym[5][2];
 
 	struct Thread *(*dvmThreadSelf)(void);
 

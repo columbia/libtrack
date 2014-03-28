@@ -31,6 +31,8 @@
 #define DVM_CALL_METHOD   "_Z13dvmCallMethodP6ThreadPK6MethodP6ObjectP6JValuez"
 #define DVM_CALL_METHOD_A "_Z14dvmCallMethodAP6ThreadPK6MethodP6ObjectbP6JValuePK6jvalue"
 #define DVM_CALL_METHOD_V "_Z14dvmCallMethodVP6ThreadPK6MethodP6ObjectbP6JValueSt9__va_list"
+#define DVM_CALL_JNI_METHOD     "_Z16dvmCallJNIMethodPKjP6JValuePK6MethodP6Thread"
+#define DVM_CALL_JNI_METHOD_CHK "_Z21dvmCheckCallJNIMethodPKjP6JValuePK6MethodP6Thread"
 
 /*
  *
@@ -132,6 +134,8 @@ void __hidden init_dvm_iface(struct dvm_iface *dvm, const char *dso_path)
 	dvm->dvmCallMethodSym[0][0] = dlsym(dvm->dso, DVM_CALL_METHOD);
 	dvm->dvmCallMethodSym[1][0] = dlsym(dvm->dso, DVM_CALL_METHOD_A);
 	dvm->dvmCallMethodSym[2][0] = dlsym(dvm->dso, DVM_CALL_METHOD_V);
+	dvm->dvmCallMethodSym[3][0] = dlsym(dvm->dso, DVM_CALL_JNI_METHOD);
+	dvm->dvmCallMethodSym[4][0] = dlsym(dvm->dso, DVM_CALL_JNI_METHOD_CHK);
 
 	/*
 	 * note: if either of these fail, then we won't ever find a
