@@ -428,6 +428,10 @@ void __hidden setup_wrap_cache(void)
 	add_entry("memcpy", NULL, WF_NOTRACE | WF_NOTIME);
 	add_entry("memcmp", NULL, WF_NOTRACE | WF_NOTIME);
 	add_entry("memmove", NULL, WF_NOTRACE | WF_NOTIME);
+	add_entry("memmem", NULL, WF_NOTRACE | WF_NOTIME);
+	add_entry("memswap", NULL, WF_NOTRACE | WF_NOTIME);
+	add_entry("memrchr", NULL, WF_NOTRACE | WF_NOTIME);
+	add_entry("__memcmp16", NULL, WF_NOTRACE | WF_NOTIME);
 	add_entry("malloc", NULL, WF_NOTRACE);
 	add_entry("realloc", NULL, WF_NOTRACE);
 	add_entry("calloc", NULL, WF_NOTRACE);
