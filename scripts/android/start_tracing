@@ -1,0 +1,19 @@
+#!/system/bin/sh
+
+echo "Unmounting trace_logs"
+umount /data/trace_logs 2>/dev/null
+sleep 2
+
+echo "Mounting tmpfs on /data/trace_logs"
+mount -t tmpfs none /data/trace_logs
+sleep 2
+
+echo "Dropping VM caches"
+echo 3 > /proc/sys/vm/drop_caches
+sleep 2
+
+/system/bin/max_cpu.sh
+sleep 2
+
+echo "Starting the trace!"
+echo "0:1" > /data/enable_trace_logs
