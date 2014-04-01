@@ -188,6 +188,11 @@ extern int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *st
 extern void *get_log(int release);
 extern void *__get_log(int release);
 
+extern const char *local_strrchr(const char *str, int c);
+extern int local_strcmp(const char *s1, const char *s2);
+extern int local_strncmp(const char *s1, const char *s2, size_t n);
+extern int local_strlen(const char *s);
+
 extern void libc_close_log(void);
 
 static inline int should_log(void)
