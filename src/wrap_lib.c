@@ -25,6 +25,7 @@ extern int wrap_special(struct tls_info *tls);
 extern int wrap_symbol_notrace(struct tls_info *tls);
 extern int wrap_symbol_notime(struct tls_info *tls);
 extern int wrap_symbol_noargs(struct tls_info *tls);
+const char *wrap_symbol_callstr(struct tls_info *tls, int *len);
 #else
 _static inline int wrap_special(struct tls_info *tls)
 {
@@ -45,6 +46,12 @@ _static inline int wrap_symbol_noargs(struct tls_info *tls)
 {
 	(void)tls;
 	return 0;
+}
+_static inline const char *wrap_symbol_callstr(struct tls_info *tls, int *len)
+{
+	(void)tls;
+	(void)len;
+	return NULL;
 }
 #endif
 
@@ -400,6 +407,7 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 {
 	int did_wrap = 0, _err, parent;
 	struct tls_info *tls = NULL;
+	uint32_t *u32regs = (uint32_t *)regs;
 
 	if (!regs || !stack || !symbol || libc.dso == (void *)1)
 		return 0;
@@ -414,7 +422,7 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 	 * don't trace anything that originates from the wrapped library:
 	 * this is an implementation detail, and we don't want it.
 	 */
-	if (is_in_wrapped_text(((uint32_t *)regs)[REG_LR_IDX]))
+	if (is_in_wrapped_text(u32regs[REG_LR_IDX]))
 		return 0;
 
 	/* we're already tracing - disable recursion */
@@ -429,7 +437,7 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 	/* initialized once per process */
 	setup_wrap_cache();
 
-	tls->info.regs = (uint32_t *)regs;
+	tls->info.regs = u32regs;
 	tls->info.symbol = symbol;
 	tls->info.func = symptr;
 	tls->info.stack = stack;
@@ -458,6 +466,16 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 		if (wrap_symbol_notrace(tls)) {
 			/* don't do a backtrace */
 			if (wrap_symbol_noargs(tls)) {
+				int slen = 0;
+				const char *callstr;
+				callstr = wrap_symbol_callstr(tls, &slen);
+				/*
+				 * don't print any args: fast path uses global
+				 * symbol cache and does a memcpy!
+				 */
+				if (callstr)
+					__bt_raw_print(tls, callstr, slen);
+				else
 					bt_printf(tls, "CALL:%s\n", symbol);
 			} else {
 				bt_printf(tls, "CALL:%s:0x%x:0x%x:0x%x:0x%x:\n",
