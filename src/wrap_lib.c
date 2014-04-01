@@ -443,6 +443,10 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 	if (tls->info.should_log) {
 		void *f;
 		libc.gettimeofday(&tls->info.tv, NULL);
+		libc.snprintf(tls->info.tv_str, sizeof(tls->info.tv_str),
+			      "%lu.%lu:", (unsigned long)tls->info.tv.tv_sec,
+			      (unsigned long)tls->info.tv.tv_usec);
+		tls->info.tv_strlen = local_strlen(tls->info.tv_str);
 		init_dvm(&dvm);
 		___open_log(tls, 1, &f);
 		if (!f)
