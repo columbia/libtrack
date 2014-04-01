@@ -78,6 +78,15 @@ local_strncmp(const char *s1, const char *s2, size_t n)
 	return 0;
 }
 
+int __hidden
+local_strlen(const char *s)
+{
+	int len = 0;
+	while (*s++)
+		len++;
+	return len;
+}
+
 struct libc_iface libc __hidden;
 
 /*
