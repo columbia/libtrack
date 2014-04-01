@@ -263,6 +263,8 @@ static struct wrap_cache_entry {
 	struct wrap_cache_entry *next;
 	const char *name;
 	handler_func handler;
+	char call_str[64];
+	int  call_strlen;
 
 	uint8_t wrapsym;  /* should be called from wrap_special */
 	uint8_t modsym;   /* should be called to modify symbol name */
@@ -307,6 +309,10 @@ static void add_entry(const char *symname, handler_func handler, int flags)
 
 	entry->name = symname;
 	entry->handler = handler;
+	entry->call_strlen = libc.snprintf(entry->call_str,
+					   sizeof(entry->call_str)-1,
+					   "CALL:%s\n", symname);
+
 	entry->wrapsym = !!(flags & WF_WRAPSYM);
 	entry->modsym = !!(flags & WF_MODSYM);
 	entry->notrace = !!(flags & WF_NOTRACE);
@@ -584,6 +590,22 @@ int __hidden wrap_symbol_noargs(struct tls_info *tls)
 	if (e)
 		return e->noargs;
 	return 0;
+}
+
+/**
+ * @wrap_symbol_callstr
+ *
+ */
+const char __hidden *wrap_symbol_callstr(struct tls_info *tls, int *len)
+{
+	struct wrap_cache_entry *e;
+	e = get_cached_sym(&tls->info);
+	if (e) {
+		if (len)
+			*len = e->call_strlen;
+		return e->call_str;
+	}
+	return NULL;
 }
 
 /**
