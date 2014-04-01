@@ -268,6 +268,7 @@ static struct wrap_cache_entry {
 	uint8_t modsym;   /* should be called to modify symbol name */
 	uint8_t notrace;
 	uint8_t notime;
+	uint8_t noargs;
 } s_wrap_cache[WRAP_CACHE_SZ];
 
 static inline uint8_t wrap_hash(const char *name)
@@ -278,10 +279,11 @@ static inline uint8_t wrap_hash(const char *name)
 	return v ? v : 0x1; /* disallow empty hash values */
 }
 
-#define WF_WRAPSYM  0x1
-#define WF_MODSYM   0x2
-#define WF_NOTRACE  0x4
-#define WF_NOTIME   0x8
+#define WF_WRAPSYM  0x01
+#define WF_MODSYM   0x02
+#define WF_NOTRACE  0x04
+#define WF_NOTIME   0x08
+#define WF_NOARGS   0x10
 
 static void add_entry(const char *symname, handler_func handler, int flags)
 {
@@ -309,6 +311,7 @@ static void add_entry(const char *symname, handler_func handler, int flags)
 	entry->modsym = !!(flags & WF_MODSYM);
 	entry->notrace = !!(flags & WF_NOTRACE);
 	entry->notime = !!(flags & WF_NOTIME);
+	entry->noargs = !!(flags & WF_NOARGS);
 }
 
 static inline struct wrap_cache_entry *get_cached_sym(struct log_info *info)
@@ -424,24 +427,24 @@ void __hidden setup_wrap_cache(void)
 	/* TODO: mmap ? */
 
 	/* functions that we don't want to backtrace */
-	add_entry("memset", NULL, WF_NOTRACE | WF_NOTIME);
-	add_entry("memcpy", NULL, WF_NOTRACE | WF_NOTIME);
-	add_entry("memcmp", NULL, WF_NOTRACE | WF_NOTIME);
-	add_entry("memmove", NULL, WF_NOTRACE | WF_NOTIME);
-	add_entry("memmem", NULL, WF_NOTRACE | WF_NOTIME);
-	add_entry("memswap", NULL, WF_NOTRACE | WF_NOTIME);
-	add_entry("memrchr", NULL, WF_NOTRACE | WF_NOTIME);
-	add_entry("__memcmp16", NULL, WF_NOTRACE | WF_NOTIME);
+	add_entry("memset", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
+	add_entry("memcpy", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
+	add_entry("memcmp", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
+	add_entry("memmove", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
+	add_entry("memmem", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
+	add_entry("memswap", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
+	add_entry("memrchr", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
+	add_entry("__memcmp16", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
 	add_entry("malloc", NULL, WF_NOTRACE);
 	add_entry("realloc", NULL, WF_NOTRACE);
 	add_entry("calloc", NULL, WF_NOTRACE);
-	add_entry("free", NULL, WF_NOTRACE | WF_NOTIME);
-	add_entry("__memcpy_chk", NULL, WF_NOTRACE | WF_NOTIME);
-	add_entry("__memmove_chk", NULL, WF_NOTRACE | WF_NOTIME);
-	add_entry("pthread_getspecific", NULL, WF_NOTRACE | WF_NOTIME);
-	add_entry("pthread_setspecific", NULL, WF_NOTRACE | WF_NOTIME);
-	add_entry("pthread_self", NULL, WF_NOTRACE | WF_NOTIME);
-	add_entry("clock_gettime", NULL, WF_NOTRACE | WF_NOTIME);
+	add_entry("free", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
+	add_entry("__memcpy_chk", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
+	add_entry("__memmove_chk", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
+	add_entry("pthread_getspecific", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
+	add_entry("pthread_setspecific", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
+	add_entry("pthread_self", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
+	add_entry("clock_gettime", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
 }
 
 /*
@@ -567,6 +570,19 @@ int __hidden wrap_symbol_notime(struct tls_info *tls)
 	e = get_cached_sym(&tls->info);
 	if (e)
 		return e->notime;
+	return 0;
+}
+
+/**
+ * @wrap_symbol_noargs
+ *
+ */
+int __hidden wrap_symbol_noargs(struct tls_info *tls)
+{
+	struct wrap_cache_entry *e;
+	e = get_cached_sym(&tls->info);
+	if (e)
+		return e->noargs;
 	return 0;
 }
 

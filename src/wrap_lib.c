@@ -24,6 +24,7 @@ extern void setup_wrap_cache(void);
 extern int wrap_special(struct tls_info *tls);
 extern int wrap_symbol_notrace(struct tls_info *tls);
 extern int wrap_symbol_notime(struct tls_info *tls);
+extern int wrap_symbol_noargs(struct tls_info *tls);
 #else
 _static inline int wrap_special(struct tls_info *tls)
 {
@@ -36,6 +37,11 @@ _static inline int wrap_symbol_notrace(struct tls_info *tls)
 	return 0;
 }
 _static inline int wrap_symbol_notime(struct tls_info *tls)
+{
+	(void)tls;
+	return 0;
+}
+_static inline int wrap_symbol_noargs(struct tls_info *tls)
 {
 	(void)tls;
 	return 0;
@@ -445,10 +451,19 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 			log_print(f, LOG, "I:FORKED:parent=%d:", parent);
 			log_flush(f);
 		}
-		if (wrap_symbol_notrace(tls)) /* don't do a backtrace */
-			bt_printf(tls, "CALL:%s\n", symbol);
-		else
+		if (wrap_symbol_notrace(tls)) {
+			/* don't do a backtrace */
+			if (wrap_symbol_noargs(tls)) {
+					bt_printf(tls, "CALL:%s\n", symbol);
+			} else {
+				bt_printf(tls, "CALL:%s:0x%x:0x%x:0x%x:0x%x:\n",
+					  symbol, u32regs[0], u32regs[1],
+					  u32regs[2], u32regs[3]);
+			}
+		} else {
+			/* standard backtrace */
 			log_backtrace(tls);
+		}
 
 		if (wrap_symbol_notime(tls))
 			tls->info.log_time = 0;
