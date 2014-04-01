@@ -248,6 +248,9 @@ struct log_info {
 	uint32_t *regs;
 	void *stack;
 	struct timeval tv;
+	char tv_str[32];
+	int  tv_strlen;
+
 	int log_time;
 
 	uint8_t should_log;
@@ -378,9 +381,16 @@ extern struct ret_ctx *get_retmem(struct tls_info *tls);
 #define BT_EXTRA_FLUSH(tls,info)
 #endif
 
+extern uint8_t * __bt_raw_print_start(struct tls_info *tls,
+				      int prlen, int *remain_r);
+extern void __bt_raw_print_end(struct tls_info *tls, int prlen);
+extern void __bt_raw_print(struct tls_info *tls,
+			   const char *str, int slen);
+
 /*
  * I'm keeping this as a macro to avoid vararg processing
  */
+#if 0
 #define __bt_printf(____tls, fmt, ...) \
 	do { \
 		int __len, __remain; \
@@ -417,6 +427,36 @@ extern struct ret_ctx *get_retmem(struct tls_info *tls);
 	__bt_printf(__tls, "%lu.%lu:" fmt, \
 		    (unsigned long)((__tls)->info.tv.tv_sec), \
 		    (unsigned long)((__tls)->info.tv.tv_usec), ## __VA_ARGS__ )
+
+#else
+#define __bt_printf(____tls, fmt, ...) \
+	do { \
+		int __len, __remain; \
+		uint8_t *__logpos = __bt_raw_print_start(____tls, 32, &__remain); \
+		if (!__logpos) \
+			break; \
+		__len = libc.snprintf((char *)__logpos, __remain, fmt, ## __VA_ARGS__ ); \
+		if (__len > __remain) { \
+			if (__logpos == (uint8_t *)((____tls)->info.log_buffer)) { \
+				/* the line is just too long... */ \
+				__bt_raw_print_end(____tls, __remain); \
+				bt_flush(____tls, &(____tls)->info); \
+				log_flush((____tls)->logfile); \
+				log_print((____tls)->logfile, LOG, "E:TRUNCATED!"); \
+				break; \
+			} \
+			*__logpos = 0; \
+			bt_flush(____tls, &(____tls)->info); \
+			continue; \
+		} \
+		__bt_raw_print_end(____tls, __len); \
+		break; \
+	} while (1)
+
+#define bt_printf(__tls, fmt, ...) \
+	__bt_printf(__tls, "%s" fmt, (__tls)->info.tv_str, ## __VA_ARGS__ )
+
+#endif
 
 #define _BUG(X) \
 	do { \

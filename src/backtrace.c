@@ -527,3 +527,56 @@ log_backtrace(struct tls_info *tls)
 	else if (tls->logfile)
 		__log_print(&tls->info.tv, tls->logfile, "CALL", "%s", tls->info.symbol);
 }
+
+uint8_t __hidden *
+__bt_raw_print_start(struct tls_info *tls, int prlen, int *remain_r)
+{
+	int remain;
+	int *log_pos;
+	if (!tls)
+		return NULL;
+	log_pos = tls->info.log_pos;
+	if (!log_pos)
+		return NULL;
+
+	remain = LOG_BUFFER_SIZE - *log_pos - 1;
+	if (remain < prlen) {
+		bt_flush(tls, &tls->info);
+		remain = LOG_BUFFER_SIZE - *log_pos - 1;
+		if (remain < prlen) { /* never going to fit... */
+			log_print(tls->logfile, LOG, "E:TRUNCATED!");
+			return NULL;
+		}
+	}
+
+	if (remain_r)
+		*remain_r = remain;
+	return (uint8_t *)(tls->info.log_buffer) + *log_pos;
+}
+
+
+void __hidden
+__bt_raw_print_end(struct tls_info *tls, int prlen)
+{
+	*(tls->info.log_pos) += prlen;
+	BT_EXTRA_FLUSH(tls, &tls->info);
+}
+
+
+void __hidden
+__bt_raw_print(struct tls_info *tls, const char *str, int slen)
+{
+	uint8_t *buf;
+
+	if (slen <= 0)
+		slen = local_strlen(str);
+	slen += tls->info.tv_strlen;
+
+	buf = __bt_raw_print_start(tls, slen, NULL);
+
+	if (buf) {
+		libc.memcpy(buf, tls->info.tv_str, tls->info.tv_strlen);
+		libc.memcpy(buf + tls->info.tv_strlen, str, slen);
+		__bt_raw_print_end(tls, slen);
+	}
+}
