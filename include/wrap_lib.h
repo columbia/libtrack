@@ -206,27 +206,28 @@ static inline int should_log(void)
 		if (cached_pid)
 			libc_close_log();
 		cached_pid = 0;
+		log_timing = 0;
 		return 0;
 	}
 	if (!cached_pid &&
 	    (f = libc.fopen(ENABLE_LOG_PATH, "r")) != NULL) {
-		cached_pid = -1;
-		log_timing = -1;
+		libc.memset(buf, 0, sizeof(buf));
 		if (libc.fread(buf, 1, sizeof(buf), f) > 0) {
 			char *tptr = buf;
+			int maybe_log_timing = 0;
 			while (*tptr && *tptr != ':'
 			       && tptr < buf + sizeof(buf))
 				tptr++;
-			while (*tptr == ':')
+			while (*tptr == ':') {
+				maybe_log_timing = 1;
 				*tptr++ = '\0';
+			}
 			cached_pid = libc.strtol(buf, NULL, 10);
-			if (tptr < buf + sizeof(buf))
+			if (maybe_log_timing && tptr < buf + sizeof(buf))
 				log_timing = libc.strtol(tptr, NULL, 10);
 		}
 		if (!cached_pid)
 			cached_pid = -1;
-		if (log_timing < 0)
-			log_timing = 0;
 		libc.fclose(f);
 	}
 
