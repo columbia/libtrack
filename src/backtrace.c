@@ -567,16 +567,20 @@ void __hidden
 __bt_raw_print(struct tls_info *tls, const char *str, int slen)
 {
 	uint8_t *buf;
+	int prlen;
 
 	if (slen <= 0)
 		slen = local_strlen(str);
-	slen += tls->info.tv_strlen;
 
-	buf = __bt_raw_print_start(tls, slen, NULL);
+	prlen = slen + tls->info.tv_strlen;
+
+	/* make sure there's enough room for us to put a terminating NULL */
+	buf = __bt_raw_print_start(tls, prlen + 1, NULL);
 
 	if (buf) {
 		libc.memcpy(buf, tls->info.tv_str, tls->info.tv_strlen);
 		libc.memcpy(buf + tls->info.tv_strlen, str, slen);
-		__bt_raw_print_end(tls, slen);
+		buf[prlen] = 0; /* make sure it's always NULL terminated */
+		__bt_raw_print_end(tls, prlen);
 	}
 }
