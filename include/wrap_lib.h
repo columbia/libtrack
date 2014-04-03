@@ -360,17 +360,17 @@ extern struct ret_ctx *get_retmem(struct tls_info *tls);
 
 #define __bt_flush(logfile, logbuffer, pos) \
 { \
+	((uint8_t *)(logbuffer))[*pos] = 0; \
 	if (zlib.valid) \
 		zlib.gzwrite((struct gzFile *)(logfile), (logbuffer), *(pos)); \
 	else \
 		libc.fwrite((logbuffer), *(pos), 1, (FILE *)(logfile)); \
+	*(pos) = 0; \
 }
 
 #define bt_flush(tls, info) \
-	if ((tls) && (tls)->logfile && (info)->log_pos && *((info)->log_pos) > 0) { \
+	if ((tls) && (tls)->logfile && (info)->log_pos && *((info)->log_pos) > 0) \
 		__bt_flush((tls)->logfile, (info)->log_buffer, (info)->log_pos); \
-		*((info)->log_pos) = 0; \
-	}
 
 #ifdef AGGRESIVE_FLUSHING
 #define BT_EXTRA_FLUSH(tls,info) \
@@ -384,6 +384,7 @@ extern struct ret_ctx *get_retmem(struct tls_info *tls);
 
 extern uint8_t * __bt_raw_print_start(struct tls_info *tls,
 				      int prlen, int *remain_r);
+extern int __bt_raw_maybe_finish(struct tls_info *tls, int len, int remain);
 extern void __bt_raw_print_end(struct tls_info *tls, int prlen);
 extern void __bt_raw_print(struct tls_info *tls,
 			   const char *str, int slen);
@@ -391,73 +392,21 @@ extern void __bt_raw_print(struct tls_info *tls,
 /*
  * I'm keeping this as a macro to avoid vararg processing
  */
-#if 0
 #define __bt_printf(____tls, fmt, ...) \
 	do { \
-		int __len, __remain; \
-		int *__log_pos; \
-		if (!(____tls) || !((____tls)->info.log_pos)) \
-			break; \
-		__log_pos = (____tls)->info.log_pos; \
-		__remain = LOG_BUFFER_SIZE - *__log_pos - 1; \
-		if (__remain <= 1) { \
-			bt_flush(____tls, &(____tls)->info); \
-			__remain = LOG_BUFFER_SIZE - *__log_pos - 1; \
-		} \
-		__len = libc.snprintf((____tls)->info.log_buffer + *__log_pos, \
-				      __remain, fmt, ## __VA_ARGS__ ); \
-		if (__len > __remain) { \
-			if (!(*__log_pos)) { \
-				/* the line is just too long... */ \
-				*__log_pos += __remain; \
-				bt_flush(____tls, &(____tls)->info); \
-				log_flush((____tls)->logfile); \
-				log_print((____tls)->logfile, LOG, "E:TRUNCATED!"); \
-				break; \
-			} \
-			(____tls)->info.log_buffer[*__log_pos] = 0; \
-			bt_flush(____tls, &(____tls)->info); \
-			continue; \
-		} \
-		*__log_pos += __len; \
-		BT_EXTRA_FLUSH(____tls, &(____tls)->info); \
-		break; \
-	} while (1)
-
-#define bt_printf(__tls, fmt, ...) \
-	__bt_printf(__tls, "%lu.%lu:" fmt, \
-		    (unsigned long)((__tls)->info.tv.tv_sec), \
-		    (unsigned long)((__tls)->info.tv.tv_usec), ## __VA_ARGS__ )
-
-#else
-#define __bt_printf(____tls, fmt, ...) \
-	do { \
-		int __len, __remain; \
+		int __ret, __len, __remain; \
 		uint8_t *__logpos = __bt_raw_print_start(____tls, 32, &__remain); \
 		if (!__logpos) \
 			break; \
 		__len = libc.snprintf((char *)__logpos, __remain, fmt, ## __VA_ARGS__ ); \
-		if (__len > __remain) { \
-			if (__logpos == (uint8_t *)((____tls)->info.log_buffer)) { \
-				/* the line is just too long... */ \
-				__bt_raw_print_end(____tls, __remain); \
-				bt_flush(____tls, &(____tls)->info); \
-				log_flush((____tls)->logfile); \
-				log_print((____tls)->logfile, LOG, "E:TRUNCATED!"); \
-				break; \
-			} \
-			*__logpos = 0; \
-			bt_flush(____tls, &(____tls)->info); \
+		__ret = __bt_raw_maybe_finish(____tls, __len, __remain); \
+		if (__ret > 0) \
 			continue; \
-		} \
-		__bt_raw_print_end(____tls, __len); \
 		break; \
 	} while (1)
 
 #define bt_printf(__tls, fmt, ...) \
 	__bt_printf(__tls, "%s" fmt, (__tls)->info.tv_str, ## __VA_ARGS__ )
-
-#endif
 
 #define _BUG(X) \
 	do { \
