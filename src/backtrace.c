@@ -554,6 +554,29 @@ __bt_raw_print_start(struct tls_info *tls, int prlen, int *remain_r)
 	return (uint8_t *)(tls->info.log_buffer) + *log_pos;
 }
 
+int __bt_raw_maybe_finish(struct tls_info *tls, int len, int remain)
+{
+	int *log_pos = tls->info.log_pos;
+
+	if (len > remain) {
+		if (!(*log_pos)) {
+			/* this buffer just doesn't fit! */
+			__bt_raw_print_end(tls, 0);
+			bt_flush(tls, &tls->info);
+			log_flush(tls->logfile);
+			log_print(tls->logfile, LOG, "E:TRUNCATED!");
+			return -1;
+		}
+		bt_flush(tls, &tls->info);
+		return 1;
+	}
+	__bt_raw_print_end(tls, len);
+	/* flush if we exactly filled the buffer */
+	if (len == remain)
+		bt_flush(tls, &tls->info);
+	return 0;
+}
+
 
 void __hidden
 __bt_raw_print_end(struct tls_info *tls, int prlen)
