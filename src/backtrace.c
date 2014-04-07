@@ -31,15 +31,15 @@ extern void wrap_symbol_mod(struct tls_info *tls);
 #define TLS_LOGBUF_SZ (LOG_BUFFER_SIZE \
 		       + (4 * sizeof(int)) \
 		       + (MAX_BT_FRAMES * sizeof(void *)))
-static char main_logbuffer[TLS_LOGBUF_SZ];
+_static char main_logbuffer[TLS_LOGBUF_SZ];
 
-static struct bt_line_cache main_btcache;
+_static struct bt_line_cache main_btcache;
 
 
 /*
  * TODO: add some locking, and make the cache global!
  */
-static struct bt_line_cache *get_bt_line_cache(void)
+_static struct bt_line_cache *get_bt_line_cache(void)
 {
 	struct tls_info *tls;
 	struct bt_line_cache *cache;
@@ -118,7 +118,7 @@ struct bt_line __hidden
 	return &l[1];
 }
 
-static int bt_setup_logbuffer(struct tls_info *tls, struct log_info *info)
+_static int bt_setup_logbuffer(struct tls_info *tls, struct log_info *info)
 {
 	char *buf;
 
@@ -204,7 +204,7 @@ void __hidden tls_release_logbuffer(struct tls_info *tls)
 	tls->info.last_stack = NULL;
 }
 
-static inline void print_info(struct tls_info *tls, int count, void *sym)
+_static void print_info(struct tls_info *tls, int count, void *sym)
 {
 	unsigned long ofst;
 	char c;
@@ -292,7 +292,7 @@ do_lookup:
 		    c, ofst, dli.dli_fname, dli.dli_fbase);
 }
 
-static void print_bt_state(struct tls_info *tls, struct bt_state *state)
+_static void print_bt_state(struct tls_info *tls, struct bt_state *state)
 {
 	int count;
 	struct bt_frame *frame;
@@ -318,7 +318,7 @@ static void print_bt_state(struct tls_info *tls, struct bt_state *state)
 	/* bt_printf(tls, "BT:END:"); */
 }
 
-static void __attribute__((noinline))
+_static void __attribute__((noinline))
 std_backtrace(struct tls_info *tls)
 {
 	struct bt_state state;
@@ -340,7 +340,7 @@ std_backtrace(struct tls_info *tls)
 }
 
 #ifdef __arm__
-static inline uintptr_t __Unwind_GetIP(__unwind_context *ctx)
+_static inline uintptr_t __Unwind_GetIP(__unwind_context *ctx)
 {
 	uint32_t val;
 	if (!libc._Unwind_VRS_Get)
@@ -359,7 +359,7 @@ static inline uintptr_t __Unwind_GetIP(__unwind_context *ctx)
  * 	bionic/libc/bionic/debug_stacktrace.cpp
  *
  */
-static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
+_static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 {
 	struct bt_state *state = (struct bt_state *)arg;
 	struct bt_frame *frame;
@@ -371,6 +371,8 @@ static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 		state->nskip++;
 		return _URC_NO_REASON;
 	}
+	if (state->count >= MAX_BT_FRAMES)
+		return _URC_END_OF_STACK;
 
 	frame = &state->frame[state->count];
 
@@ -406,6 +408,12 @@ static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 
 	if (state->count > 0) {
 		if (state->frame[state->count - 1].pc == (void *)ip) {
+			/* don't continue indefinitely! */
+			if (++(state->recursion) > MAX_RECURSIVE_DEPTH) {
+				frame->pc = (void *)-1;
+				state->count++;
+				return _URC_END_OF_STACK;
+			}
 			/* recursion: skip this frame! */
 			return _URC_NO_REASON;
 		}
@@ -413,6 +421,7 @@ static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 
 	frame->pc = (void *)ip;
 
+	state->recursion = 0;
 	state->count++;
 
 	if (state->count >= MAX_BT_FRAMES)
@@ -420,7 +429,7 @@ static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 	return _URC_NO_REASON;
 }
 
-static inline int is_same_stack(struct bt_frame *current, void **last, int count)
+_static inline int is_same_stack(struct bt_frame *current, void **last, int count)
 {
 	int i;
 	for (i = 0; i < count; i++) {
@@ -431,7 +440,7 @@ static inline int is_same_stack(struct bt_frame *current, void **last, int count
 }
 
 
-static void __attribute__((noinline))
+_static void __attribute__((noinline))
 unwind_backtrace(struct tls_info *tls)
 {
 	Dl_info dli;
@@ -517,4 +526,84 @@ log_backtrace(struct tls_info *tls)
 		unwind_backtrace(tls);
 	else if (tls->logfile)
 		__log_print(&tls->info.tv, tls->logfile, "CALL", "%s", tls->info.symbol);
+}
+
+uint8_t __hidden *
+__bt_raw_print_start(struct tls_info *tls, int prlen, int *remain_r)
+{
+	int remain;
+	int *log_pos;
+	if (!tls)
+		return NULL;
+	log_pos = tls->info.log_pos;
+	if (!log_pos)
+		return NULL;
+
+	remain = LOG_BUFFER_SIZE - *log_pos - 1;
+	if (remain < prlen) {
+		bt_flush(tls, &tls->info);
+		remain = LOG_BUFFER_SIZE - *log_pos - 1;
+		if (remain < prlen) { /* never going to fit... */
+			log_print(tls->logfile, LOG, "E:TRUNCATED!");
+			return NULL;
+		}
+	}
+
+	if (remain_r)
+		*remain_r = remain;
+	return (uint8_t *)(tls->info.log_buffer) + *log_pos;
+}
+
+int __bt_raw_maybe_finish(struct tls_info *tls, int len, int remain)
+{
+	int *log_pos = tls->info.log_pos;
+
+	if (len > remain) {
+		if (!(*log_pos)) {
+			/* this buffer just doesn't fit! */
+			__bt_raw_print_end(tls, 0);
+			bt_flush(tls, &tls->info);
+			log_flush(tls->logfile);
+			log_print(tls->logfile, LOG, "E:TRUNCATED!");
+			return -1;
+		}
+		bt_flush(tls, &tls->info);
+		return 1;
+	}
+	__bt_raw_print_end(tls, len);
+	/* flush if we exactly filled the buffer */
+	if (len == remain)
+		bt_flush(tls, &tls->info);
+	return 0;
+}
+
+
+void __hidden
+__bt_raw_print_end(struct tls_info *tls, int prlen)
+{
+	*(tls->info.log_pos) += prlen;
+	BT_EXTRA_FLUSH(tls, &tls->info);
+}
+
+
+void __hidden
+__bt_raw_print(struct tls_info *tls, const char *str, int slen)
+{
+	uint8_t *buf;
+	int prlen;
+
+	if (slen <= 0)
+		slen = local_strlen(str);
+
+	prlen = slen + tls->info.tv_strlen;
+
+	/* make sure there's enough room for us to put a terminating NULL */
+	buf = __bt_raw_print_start(tls, prlen + 1, NULL);
+
+	if (buf) {
+		libc.memcpy(buf, tls->info.tv_str, tls->info.tv_strlen);
+		libc.memcpy(buf + tls->info.tv_strlen, str, slen);
+		buf[prlen] = 0; /* make sure it's always NULL terminated */
+		__bt_raw_print_end(tls, prlen);
+	}
 }

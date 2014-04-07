@@ -1,0 +1,41 @@
+#!/system/bin/sh
+
+rm /data/enable_trace_logs 2>/dev/null
+echo "Tracing stopped. waiting a second"
+sleep 1
+
+echo ""
+echo "Flushing trace logs"
+echo "Zygote might reboot - don't be alarmed!"
+echo "Just make sure the device doesn't reboot."
+echo ""
+
+SZ=`busybox du -sh /data/trace_logs`
+echo "Size before flush: $SZ"
+
+tkill=/system/bin/tkill
+if [ -z "$tkill" ]; then
+	echo "no tkill utility!"
+	exit 1
+fi
+if [ ! -x "$tkill" ]; then
+	echo "no tkill utility!"
+	exit 1
+fi
+
+echo "Sending signals..."
+PID_LIST=`ls /data/trace_logs | grep -v sh | busybox awk -F '.' '{print $1"."$2}' | busybox sort -u -n -r`
+for p in $PID_LIST; do
+  $tkill 12 $p 2>/dev/null
+  busybox sleep 0.1
+done
+#$tkill 12 $PID_LIST 2>/dev/null >/dev/null
+
+SZ=`busybox du -sh /data/trace_logs`
+echo "Size after flush: $SZ"
+
+/system/bin/min_cpu.sh
+
+echo ""
+echo "Logs ready to be pulled!"
+

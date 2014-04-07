@@ -4,6 +4,7 @@
  *
  */
 #pragma GCC diagnostic ignored "-fpermissive"
+#ifdef ANDROID
 
 #include <string>
 
@@ -30,6 +31,8 @@
 #define DVM_CALL_METHOD   "_Z13dvmCallMethodP6ThreadPK6MethodP6ObjectP6JValuez"
 #define DVM_CALL_METHOD_A "_Z14dvmCallMethodAP6ThreadPK6MethodP6ObjectbP6JValuePK6jvalue"
 #define DVM_CALL_METHOD_V "_Z14dvmCallMethodVP6ThreadPK6MethodP6ObjectbP6JValueSt9__va_list"
+#define DVM_CALL_JNI_METHOD     "_Z16dvmCallJNIMethodPKjP6JValuePK6MethodP6Thread"
+#define DVM_CALL_JNI_METHOD_CHK "_Z21dvmCheckCallJNIMethodPKjP6JValuePK6MethodP6Thread"
 
 /*
  *
@@ -49,7 +52,7 @@
 #define sym_DVM_HumanReadableMethod	_Z22dvmHumanReadableMethodPK6Methodb
 #define sym_DVM_GetThreadName		_Z16dvmGetThreadNameP6Thread
 
-struct dvm_iface dvm __attribute__((visibility("hidden")));
+struct dvm_iface dvm __hidden;
 
 #define TLS_DVM_STACK_SZ \
 	(((MAX_BT_FRAMES) * sizeof(struct Method *)) + (2 * sizeof(int)))
@@ -58,9 +61,9 @@ struct dvm_iface dvm __attribute__((visibility("hidden")));
 #define dvmstk_repeat(buf)     ((int *)((char *)(buf) + sizeof(int)))
 #define dvmstk_metharr(buf)    ((struct Method **)((char *)(buf) + 2*sizeof(int)))
 
-static char main_dvmstack[TLS_DVM_STACK_SZ];
+_static char main_dvmstack[TLS_DVM_STACK_SZ];
 
-static void *_find_symbol_end(void *sym_start)
+_static void *_find_symbol_end(void *sym_start)
 {
 	Dl_info dli;
 	void *sym_end = sym_start;
@@ -82,7 +85,7 @@ static void *_find_symbol_end(void *sym_start)
 }
 
 extern "C"
-void init_dvm_iface(struct dvm_iface *dvm, const char *dso_path)
+void __hidden init_dvm_iface(struct dvm_iface *dvm, const char *dso_path)
 {
 	int ii;
 
@@ -131,6 +134,8 @@ void init_dvm_iface(struct dvm_iface *dvm, const char *dso_path)
 	dvm->dvmCallMethodSym[0][0] = dlsym(dvm->dso, DVM_CALL_METHOD);
 	dvm->dvmCallMethodSym[1][0] = dlsym(dvm->dso, DVM_CALL_METHOD_A);
 	dvm->dvmCallMethodSym[2][0] = dlsym(dvm->dso, DVM_CALL_METHOD_V);
+	dvm->dvmCallMethodSym[3][0] = dlsym(dvm->dso, DVM_CALL_JNI_METHOD);
+	dvm->dvmCallMethodSym[4][0] = dlsym(dvm->dso, DVM_CALL_JNI_METHOD_CHK);
 
 	/*
 	 * note: if either of these fail, then we won't ever find a
@@ -156,7 +161,7 @@ void init_dvm_iface(struct dvm_iface *dvm, const char *dso_path)
 }
 
 extern "C"
-void init_dvm(struct dvm_iface *dvm)
+void __hidden init_dvm(struct dvm_iface *dvm)
 {
 	if (!dvm)
 		return;
@@ -165,7 +170,7 @@ void init_dvm(struct dvm_iface *dvm)
 }
 
 extern "C"
-void close_dvm_iface(struct dvm_iface *dvm)
+void __hidden close_dvm_iface(struct dvm_iface *dvm)
 {
 	void *dso;
 
@@ -178,7 +183,7 @@ void close_dvm_iface(struct dvm_iface *dvm)
 	dvm->dso = NULL;
 }
 
-static inline int _in_range(void *v, void *range[])
+_static inline int _in_range(void *v, void *range[])
 {
 	if (v >= range[0] && v <= range[1])
 		return 1;
@@ -186,8 +191,8 @@ static inline int _in_range(void *v, void *range[])
 }
 
 extern "C"
-void get_dvm_backtrace(struct tls_info *tls, struct dvm_iface *dvm,
-		       struct bt_state *bt_state, struct dvm_bt *dvm_bt)
+void __hidden get_dvm_backtrace(struct tls_info *tls, struct dvm_iface *dvm,
+				struct bt_state *bt_state, struct dvm_bt *dvm_bt)
 {
 	int cnt;
 
@@ -221,13 +226,21 @@ do_dvm_bt:
 		struct Thread *self;
 		uint32_t *fp = NULL;
 		char *tname;
+		struct Method **mlist;
 		int r;
 
 		self = dvm->dvmThreadSelf();
 		if (!self)
 			return;
 		fp = self->interpSave.curFrame;
+		if (!fp)
+			return;
 
+		/*
+		 * There is a bug in dvmGetThreadName() that causes this
+		 * to crash when we call it before the thread has a
+		 * Java/Dalvik name, but after a Java function has been
+		 * invoked. This happens primarily at system boot...
 		tname = tls->dvm_threadname;
 		if (!tname[0]) {
 			int len;
@@ -238,19 +251,45 @@ do_dvm_bt:
 			libc.memcpy(tname, nm.c_str(), len);
 			libc_log("I:DalvikThreadName:%s:", tname);
 		}
+		*/
 
+		mlist = dvm_bt->mlist;
 		dvm_bt->count = dvm->dvmComputeExactFrameDepth(fp);
-		if (dvm_bt->count > MAX_BT_FRAMES)
+		if (dvm_bt->count > MAX_BT_FRAMES) {
+			/*
+			 * we need an array big enough for this frame
+			 * because the dvm fill stack array function
+			 * doesn't care how big our array really is...
+			 */
+			mlist = libc.malloc((dvm_bt->count + 1) * sizeof(struct Method *));
+			if (!mlist) {
+				dvm_bt->count = 0;
+				return;
+			}
 			dvm_bt->count = MAX_BT_FRAMES;
+		}
 
-		dvm->dvmFillStackTraceArray(fp, dvm_bt->mlist, dvm_bt->count);
+		/*
+		 * Grrr. This API doesn't respect the 'length' parameter.
+		 * It just sends out an error message (if you're lucky enough
+		 * to have copiled without NDEBUG), and continues to mash on
+		 * your memory even though it's out of bounds...
+		 */
+		dvm->dvmFillStackTraceArray(fp, mlist, dvm_bt->count);
+
+		if (mlist != dvm_bt->mlist) {
+			/* copy only the portion of data back that fits */
+			libc.memcpy(dvm_bt->mlist, mlist,
+				    dvm_bt->count * sizeof(struct Method *));
+			libc.free(mlist);
+		}
 	}
 
 	return;
 }
 
-static char *__setup_dvmstack(struct tls_info *tls, int **last_depth,
-			      int **last_repeat, struct Method ***last_meth)
+_static char *__setup_dvmstack(struct tls_info *tls, int **last_depth,
+			       int **last_repeat, struct Method ***last_meth)
 {
 	char *last_stack;
 	if (!tls)
@@ -275,7 +314,8 @@ static char *__setup_dvmstack(struct tls_info *tls, int **last_depth,
 	return last_stack;
 }
 
-void tls_release_dvmstack(struct tls_info *tls)
+extern "C"
+void __hidden tls_release_dvmstack(struct tls_info *tls)
 {
 	char *stack;
 
@@ -294,8 +334,8 @@ void tls_release_dvmstack(struct tls_info *tls)
 	tls->dvmstack = NULL;
 }
 
-static int compare_traces(struct tls_info *tls,
-			  struct dvm_iface *dvm, struct dvm_bt *dvm_bt)
+_static int compare_traces(struct tls_info *tls,
+			   struct dvm_iface *dvm, struct dvm_bt *dvm_bt)
 {
 	char *last_stack = NULL;
 	int ii, ret;
@@ -335,7 +375,7 @@ save_current_stack:
 	return ret;
 }
 
-static void print_dvm_sym(struct tls_info *tls, struct dvm_iface *dvm,
+_static void print_dvm_sym(struct tls_info *tls, struct dvm_iface *dvm,
 			  int count, struct Method *m)
 {
 	struct bt_line_cache *cache = NULL;
@@ -368,8 +408,8 @@ do_lookup:
 }
 
 extern "C"
-void print_dvm_bt(struct tls_info *tls, struct dvm_iface *dvm,
-		  struct dvm_bt *dvm_bt)
+void __hidden print_dvm_bt(struct tls_info *tls, struct dvm_iface *dvm,
+			   struct dvm_bt *dvm_bt)
 {
 	int ii;
 
@@ -390,3 +430,4 @@ void print_dvm_bt(struct tls_info *tls, struct dvm_iface *dvm,
 	/* bt_printf(tls, "DVM:BT_END:\n"); */
 	return;
 }
+#endif /* ANDROID */

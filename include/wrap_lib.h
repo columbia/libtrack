@@ -25,6 +25,15 @@
 
 __BEGIN_DECLS
 
+/* easily export / hide all non-wrapped functionality */
+#ifdef EXPORT_ALL_SYMS
+#define _static
+#define __hidden
+#else
+#define _static static
+#define __hidden __attribute__((visibility("hidden")))
+#endif
+
 #include "libz.h"
 
 #define ___str(x) #x
@@ -36,8 +45,6 @@ __BEGIN_DECLS
 	const typeof( ((type *)0)->member ) *__mptr = (ptr);	\
 	(type *)( (char *)__mptr - offsetof(type,member) );})
 #endif
-
-#define __hidden __attribute__((visibility("hidden")))
 
 #define ARRAY_SZ(arr) \
 	(sizeof(arr) / sizeof((arr)[0]))
@@ -181,6 +188,11 @@ extern int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *st
 extern void *get_log(int release);
 extern void *__get_log(int release);
 
+extern const char *local_strrchr(const char *str, int c);
+extern int local_strcmp(const char *s1, const char *s2);
+extern int local_strncmp(const char *s1, const char *s2, size_t n);
+extern int local_strlen(const char *s);
+
 extern void libc_close_log(void);
 
 static inline int should_log(void)
@@ -194,27 +206,28 @@ static inline int should_log(void)
 		if (cached_pid)
 			libc_close_log();
 		cached_pid = 0;
+		log_timing = 0;
 		return 0;
 	}
 	if (!cached_pid &&
 	    (f = libc.fopen(ENABLE_LOG_PATH, "r")) != NULL) {
-		cached_pid = -1;
-		log_timing = -1;
+		libc.memset(buf, 0, sizeof(buf));
 		if (libc.fread(buf, 1, sizeof(buf), f) > 0) {
 			char *tptr = buf;
+			int maybe_log_timing = 0;
 			while (*tptr && *tptr != ':'
 			       && tptr < buf + sizeof(buf))
 				tptr++;
-			while (*tptr == ':')
+			while (*tptr == ':') {
+				maybe_log_timing = 1;
 				*tptr++ = '\0';
+			}
 			cached_pid = libc.strtol(buf, NULL, 10);
-			if (tptr < buf + sizeof(buf))
+			if (maybe_log_timing && tptr < buf + sizeof(buf))
 				log_timing = libc.strtol(tptr, NULL, 10);
 		}
 		if (!cached_pid)
 			cached_pid = -1;
-		if (log_timing < 0)
-			log_timing = 0;
 		libc.fclose(f);
 	}
 
@@ -228,7 +241,7 @@ static inline int should_log(void)
 
 extern volatile int*  __errno(void);
 
-#define LOG_BUFFER_SIZE (128 * 1024)
+#define LOG_BUFFER_SIZE (32 * 1024)
 
 struct log_info {
 	const char *symbol;
@@ -236,6 +249,9 @@ struct log_info {
 	uint32_t *regs;
 	void *stack;
 	struct timeval tv;
+	char tv_str[32];
+	int  tv_strlen;
+
 	int log_time;
 
 	uint8_t should_log;
@@ -344,17 +360,17 @@ extern struct ret_ctx *get_retmem(struct tls_info *tls);
 
 #define __bt_flush(logfile, logbuffer, pos) \
 { \
+	((uint8_t *)(logbuffer))[*pos] = 0; \
 	if (zlib.valid) \
 		zlib.gzwrite((struct gzFile *)(logfile), (logbuffer), *(pos)); \
 	else \
 		libc.fwrite((logbuffer), *(pos), 1, (FILE *)(logfile)); \
+	*(pos) = 0; \
 }
 
 #define bt_flush(tls, info) \
-	if ((tls) && (tls)->logfile && (info)->log_pos && *((info)->log_pos) > 0) { \
+	if ((tls) && (tls)->logfile && (info)->log_pos && *((info)->log_pos) > 0) \
 		__bt_flush((tls)->logfile, (info)->log_buffer, (info)->log_pos); \
-		*((info)->log_pos) = 0; \
-	}
 
 #ifdef AGGRESIVE_FLUSHING
 #define BT_EXTRA_FLUSH(tls,info) \
@@ -366,45 +382,31 @@ extern struct ret_ctx *get_retmem(struct tls_info *tls);
 #define BT_EXTRA_FLUSH(tls,info)
 #endif
 
+extern uint8_t * __bt_raw_print_start(struct tls_info *tls,
+				      int prlen, int *remain_r);
+extern int __bt_raw_maybe_finish(struct tls_info *tls, int len, int remain);
+extern void __bt_raw_print_end(struct tls_info *tls, int prlen);
+extern void __bt_raw_print(struct tls_info *tls,
+			   const char *str, int slen);
+
 /*
  * I'm keeping this as a macro to avoid vararg processing
  */
 #define __bt_printf(____tls, fmt, ...) \
 	do { \
-		int __len, __remain; \
-		int *__log_pos; \
-		if (!(____tls) || !((____tls)->info.log_pos)) \
+		int __ret, __len, __remain; \
+		uint8_t *__logpos = __bt_raw_print_start(____tls, 32, &__remain); \
+		if (!__logpos) \
 			break; \
-		__log_pos = (____tls)->info.log_pos; \
-		__remain = LOG_BUFFER_SIZE - *__log_pos - sizeof(int) - 1; \
-		if (__remain <= 1) { \
-			bt_flush(____tls, &(____tls)->info); \
-			__remain = LOG_BUFFER_SIZE - *__log_pos \
-				   - sizeof(int) - 1; \
-		} \
-		__len = libc.snprintf((____tls)->info.log_buffer + *__log_pos, \
-				      __remain, fmt, ## __VA_ARGS__ ); \
-		if (__len > __remain) { \
-			if (!(*__log_pos)) { \
-				/* the line is just too long... */ \
-				*__log_pos += __remain; \
-				bt_flush(____tls, &(____tls)->info); \
-				log_print((____tls)->logfile, LOG, "E:TRUNCATED!"); \
-				break; \
-			} \
-			(____tls)->info.log_buffer[*__log_pos] = 0; \
-			bt_flush(____tls, &(____tls)->info); \
+		__len = libc.snprintf((char *)__logpos, __remain, fmt, ## __VA_ARGS__ ); \
+		__ret = __bt_raw_maybe_finish(____tls, __len, __remain); \
+		if (__ret > 0) \
 			continue; \
-		} \
-		*__log_pos += __len; \
-		BT_EXTRA_FLUSH(____tls, &(____tls)->info); \
 		break; \
 	} while (1)
 
 #define bt_printf(__tls, fmt, ...) \
-	__bt_printf(__tls, "%lu.%lu:" fmt, \
-		    (unsigned long)((__tls)->info.tv.tv_sec), \
-		    (unsigned long)((__tls)->info.tv.tv_usec), ## __VA_ARGS__ )
+	__bt_printf(__tls, "%s" fmt, (__tls)->info.tv_str, ## __VA_ARGS__ )
 
 #define _BUG(X) \
 	do { \

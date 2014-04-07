@@ -22,11 +22,36 @@ extern void setup_wrap_cache(void);
 /* lib-specific wrapping handlers (e.g. [v]fork in libc) */
 #ifdef HAVE_WRAP_SPECIAL
 extern int wrap_special(struct tls_info *tls);
+extern int wrap_symbol_notrace(struct tls_info *tls);
+extern int wrap_symbol_notime(struct tls_info *tls);
+extern int wrap_symbol_noargs(struct tls_info *tls);
+const char *wrap_symbol_callstr(struct tls_info *tls, int *len);
 #else
-static inline int wrap_special(struct tls_info *tls)
+_static inline int wrap_special(struct tls_info *tls)
 {
-	(void)info;
+	(void)tls;
 	return 0;
+}
+_static inline int wrap_symbol_notrace(struct tls_info *tls)
+{
+	(void)tls;
+	return 0;
+}
+_static inline int wrap_symbol_notime(struct tls_info *tls)
+{
+	(void)tls;
+	return 0;
+}
+_static inline int wrap_symbol_noargs(struct tls_info *tls)
+{
+	(void)tls;
+	return 0;
+}
+_static inline const char *wrap_symbol_callstr(struct tls_info *tls, int *len)
+{
+	(void)tls;
+	(void)len;
+	return NULL;
 }
 #endif
 
@@ -66,6 +91,15 @@ local_strncmp(const char *s1, const char *s2, size_t n)
 	return 0;
 }
 
+int __hidden
+local_strlen(const char *s)
+{
+	int len = 0;
+	while (*s++)
+		len++;
+	return len;
+}
+
 struct libc_iface libc __hidden;
 
 /*
@@ -78,7 +112,7 @@ struct libc_iface libc __hidden;
 #define TEXT_SIZE(size)
 #define SAVED(addr,name) #name
 #define SYM(addr,name)
-static const char *wrapped_sym=
+_static const char *wrapped_sym=
 #include "real_syms.h"
 ;
 #undef TEXT_SIZE
@@ -102,7 +136,7 @@ struct symbol {
 #define TEXT_SIZE(size) size
 #define SAVED(addr,name)
 #define SYM(addr,name)
-static int wrapped_text_size =
+_static int wrapped_text_size =
 #include "real_syms.h"
 ;
 #undef TEXT_SIZE
@@ -112,13 +146,16 @@ static int wrapped_text_size =
 int cached_pid = 0;
 int log_timing = 0;
 
-static Dl_info wrapped_dli;
-static Dl_info dl_dli;
+_static Dl_info wrapped_dli;
+_static Dl_info dl_dli;
+
+_static unsigned long *addr_blacklist = NULL;
+_static int blacklist_sz = 0;
 
 /*
  * Is the given address within the TEXT section of our wrapped library?
  */
-static int is_in_wrapped_text(unsigned long addr)
+_static int is_in_wrapped_text(unsigned long addr)
 {
 	unsigned long start, end;
 
@@ -135,7 +172,7 @@ static int is_in_wrapped_text(unsigned long addr)
  * given DSO handle.
  *
  */
-static void *table_dlsym(void *dso, const char *sym, int allow_null)
+_static void *table_dlsym(void *dso, const char *sym, int allow_null)
 {
 	struct symbol *symbol;
 
@@ -163,7 +200,7 @@ static void *table_dlsym(void *dso, const char *sym, int allow_null)
 	return (void *)((char *)wrapped_dli.dli_fbase + symbol->offset);
 }
 
-static inline FILE *__open_stdlogfile(struct tls_info *tls)
+_static inline FILE *__open_stdlogfile(struct tls_info *tls)
 {
 	FILE *logf;
 	char *buf = &(tls->logname[0]);
@@ -179,7 +216,7 @@ static inline FILE *__open_stdlogfile(struct tls_info *tls)
 	return logf;
 }
 
-static inline struct gzFile *__open_gzlogfile(struct tls_info *tls)
+_static inline struct gzFile *__open_gzlogfile(struct tls_info *tls)
 {
 	FILE *logf;
 	struct gzFile *gzlogf;
@@ -204,14 +241,14 @@ static inline struct gzFile *__open_gzlogfile(struct tls_info *tls)
 	return gzlogf;
 }
 
-static void ___open_log(struct tls_info *tls, int acquire_new, void **logf)
+_static void ___open_log(struct tls_info *tls, int acquire_new, void **logf)
 {
 	void *f;
 
 	if (logf)
 		*logf = NULL;
 
-	if (!tls)
+	if (!tls || libc.dso == (void *)1)
 		return;
 	if (!libc.dso) {
 		if (init_libc_iface(&libc, LIBC_PATH) < 0)
@@ -230,8 +267,12 @@ static void ___open_log(struct tls_info *tls, int acquire_new, void **logf)
 				f = (void *)__open_stdlogfile(tls);
 				log_print(f, LOG, "E:Failed to open libz!");
 			}
-		} else
+		} else {
 			f = (void *)__open_stdlogfile(tls);
+		}
+
+		if (!f)
+			return; /* can't open log file! */
 
 		tls->logfile = f;
 		log_print(f, LOG, "BEGIN(%s)", wsym(tls));
@@ -242,7 +283,7 @@ static void ___open_log(struct tls_info *tls, int acquire_new, void **logf)
 		*logf = f;
 }
 
-static void *___get_log(int release, int acquire_new)
+_static void *___get_log(int release, int acquire_new)
 {
 	struct tls_info *tls;
 	void *f = NULL;
@@ -299,9 +340,8 @@ void __hidden libc_close_log(void)
 	struct tls_info *tls;
 
 	tls = peek_tls();
-	if (!tls || !tls->logfile)
+	if (!tls)
 		return;
-
 	tls_release_logfile(tls);
 }
 
@@ -367,8 +407,9 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 {
 	int did_wrap = 0, _err, parent;
 	struct tls_info *tls = NULL;
+	uint32_t *u32regs = (uint32_t *)regs;
 
-	if (!regs || !stack || !symbol)
+	if (!regs || !stack || !symbol || libc.dso == (void *)1)
 		return 0;
 
 	_err = *__errno();
@@ -381,7 +422,7 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 	 * don't trace anything that originates from the wrapped library:
 	 * this is an implementation detail, and we don't want it.
 	 */
-	if (is_in_wrapped_text(((uint32_t *)regs)[REG_LR_IDX]))
+	if (is_in_wrapped_text(u32regs[REG_LR_IDX]))
 		return 0;
 
 	/* we're already tracing - disable recursion */
@@ -396,7 +437,7 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 	/* initialized once per process */
 	setup_wrap_cache();
 
-	tls->info.regs = (uint32_t *)regs;
+	tls->info.regs = u32regs;
 	tls->info.symbol = symbol;
 	tls->info.func = symptr;
 	tls->info.stack = stack;
@@ -410,6 +451,10 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 	if (tls->info.should_log) {
 		void *f;
 		libc.gettimeofday(&tls->info.tv, NULL);
+		libc.snprintf(tls->info.tv_str, sizeof(tls->info.tv_str),
+			      "%lu.%lu:", (unsigned long)tls->info.tv.tv_sec,
+			      (unsigned long)tls->info.tv.tv_usec);
+		tls->info.tv_strlen = local_strlen(tls->info.tv_str);
 		init_dvm(&dvm);
 		___open_log(tls, 1, &f);
 		if (!f)
@@ -418,7 +463,32 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 			log_print(f, LOG, "I:FORKED:parent=%d:", parent);
 			log_flush(f);
 		}
-		log_backtrace(tls);
+		if (wrap_symbol_notrace(tls)) {
+			/* don't do a backtrace */
+			if (wrap_symbol_noargs(tls)) {
+				int slen = 0;
+				const char *callstr;
+				callstr = wrap_symbol_callstr(tls, &slen);
+				/*
+				 * don't print any args: fast path uses global
+				 * symbol cache and does a memcpy!
+				 */
+				if (callstr)
+					__bt_raw_print(tls, callstr, slen);
+				else
+					bt_printf(tls, "CALL:%s\n", symbol);
+			} else {
+				bt_printf(tls, "CALL:%s:0x%x:0x%x:0x%x:0x%x:\n",
+					  symbol, u32regs[0], u32regs[1],
+					  u32regs[2], u32regs[3]);
+			}
+		} else {
+			/* standard backtrace */
+			log_backtrace(tls);
+		}
+
+		if (wrap_symbol_notime(tls))
+			tls->info.log_time = 0;
 	} else if (tls->logfile) {
 		/*
 		 * We get here is we're not logging, but we have a logfile
@@ -457,6 +527,8 @@ out:
 int __hidden init_libc_iface(struct libc_iface *iface, const char *dso_path)
 {
 	if (!iface->dso) {
+		/* guard against recursive calls from library initializers */
+		iface->dso = (void *)1;
 		iface->dso = dlopen(dso_path, RTLD_NOW | RTLD_LOCAL);
 		if (!iface->dso)
 			_BUG(0x40);

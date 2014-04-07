@@ -3,11 +3,28 @@ use strict;
 use warnings;
 use POSIX qw(strtol);
 
+my $prio = "never";
+if ($ARGV[0] eq "-prio") {
+	if ($ARGV[1] eq "1") {
+		$prio = "always";
+	} elsif ($ARGV[1] eq "2") {
+		$prio = "never";
+	} else {
+		die "Invalid -prio option: '$ARGV[1]'";
+	}
+	shift @ARGV;
+	shift @ARGV;
+}
+
 my $objdump = shift;
 my $syscall_file = shift;
 
 open my $SC, "<", $syscall_file or die "Can't open syscall table!";
 open my $CODE, "<", $objdump or die "Can't open ARM assembly file!";
+
+if (not $prio eq "always" and not $prio eq "never") {
+	die "Invalid prio: '$prio'"
+}
 
 my %syscalls;
 my %extra_syscalls;
@@ -32,11 +49,31 @@ sub find_syscalls {
 		# Set the entrypoint
 		if (/^[0-9a-f]+ <([^>]+)>:.*/) {
 			$entrypoint = $1;
-			if (exists $dowrap{$entrypoint} and
-			    !exists $extra_syscalls{$entrypoint} and
-			    !exists $syscalls{$entrypoint}) {
-			    	#warn "\talways_wrap:$entrypoint\n";
-				$extra_syscalls{$entrypoint} = 1;
+			if ($prio eq "always") {
+				# check always-wrap list first, then never wrap
+				if (exists $dowrap{$entrypoint} and
+				    !exists $extra_syscalls{$entrypoint} and
+				    !exists $syscalls{$entrypoint}) {
+					#warn "\talways_wrap:$entrypoint\n";
+					$extra_syscalls{$entrypoint} = 1;
+				}
+			} else {
+				# check never-wrap list first, then always wrap
+				my $shouldwrap = 1;
+				if (exists $nowrap{$entrypoint}) {
+					$shouldwrap = 0;
+				} else {
+					foreach my $re (keys %nowrap_re) {
+						if ($entrypoint =~ m/$re/) { $shouldwrap = 0; last; }
+					}
+				}
+				if ($shouldwrap == 1 and
+				    exists $dowrap{$entrypoint} and
+				    !exists $extra_syscalls{$entrypoint} and
+				    !exists $syscalls{$entrypoint}) {
+					#warn "\talways_wrap(!never):$entrypoint\n";
+					$extra_syscalls{$entrypoint} = 1;
+				}
 			}
 			next;
 		}
@@ -66,12 +103,23 @@ sub find_syscalls {
 				#warn "\t\t(r:$sc)\n";
 				next;
 			}
-			if (exists $nowrap{$entrypoint}) { next; }
-			my $dowrap = 1;
-			foreach my $re (keys %nowrap_re) {
-				if ($entrypoint =~ m/$re/) { $dowrap = 0; last; }
+			my $shouldwrap = 1;
+			if ($prio eq "never") {
+				if (exists $nowrap{$entrypoint}) { next; }
+				foreach my $re (keys %nowrap_re) {
+					if ($entrypoint =~ m/$re/) { $shouldwrap = 0; last; }
+				}
+			} else {
+				if (not exists $dowrap{$entrypoint}) {
+					# check the never wrap list b/c it's
+					# not in the always wrap list
+					if (exists $nowrap{$entrypoint}) { next; }
+					foreach my $re (keys %nowrap_re) {
+						if ($entrypoint =~ m/$re/) { $shouldwrap = 0; last; }
+					}
+				}
 			}
-			if ($dowrap == 0) { next; }
+			if ($shouldwrap == 0) { next; }
 			if (exists $tmp_calls{$entrypoint} or
 			    exists $extra_syscalls{$entrypoint} or
 			    exists $syscalls{$entrypoint} or

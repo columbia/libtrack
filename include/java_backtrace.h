@@ -24,14 +24,6 @@ __BEGIN_DECLS
 
 #if defined(HAVE_ENDIAN_H)
 # include <endian.h>
-#else /*not HAVE_ENDIAN_H*/
-# define __BIG_ENDIAN 4321
-# define __LITTLE_ENDIAN 1234
-# if defined(HAVE_LITTLE_ENDIAN)
-#  define __BYTE_ORDER __LITTLE_ENDIAN
-# else
-#  define __BYTE_ORDER __BIG_ENDIAN
-# endif
 #endif /*not HAVE_ENDIAN_H*/
 
 typedef uint8_t  u1;
@@ -124,7 +116,7 @@ struct dvm_iface {
 	void *dso;
 	int valid;
 
-	void *dvmCallMethodSym[3][2];
+	void *dvmCallMethodSym[5][2];
 
 	struct Thread *(*dvmThreadSelf)(void);
 
