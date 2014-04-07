@@ -23,5 +23,5 @@ for l in "${LIBS[@]}"; do
 	ofile="${ODIR}/${l/.so/.sym}"
 	mkdir -p "$(dirname "$ofile")" 2>/dev/null
 	echo "Extracting symbols from $(basename "$l")..."
-	$READELF -s "${IDIR}/$l" | grep "GLOBAL\|WEAK" | grep -v UND | awk '{print $8}' > "$ofile"
+	$READELF -W -s "${IDIR}/$l" | grep "GLOBAL\|WEAK" | grep -v UND | awk '{print $8}' > "$ofile"
 done

@@ -18,7 +18,7 @@ fi
 symtotal=0
 symfound=0
 
-exec 9<$1
+exec 9<$symfile
 while read sym; do
 	symtotal=$(($symtotal+1))
 	echo -n "Looking for '$sym'..."
