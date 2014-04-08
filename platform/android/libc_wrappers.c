@@ -311,7 +311,7 @@ static void add_entry(const char *symname, handler_func handler, int flags)
 	entry->handler = handler;
 	entry->call_strlen = libc.snprintf(entry->call_str,
 					   sizeof(entry->call_str)-1,
-					   "CALL:%s\n", symname);
+					   "CALL:%s\n ", symname);
 
 	entry->wrapsym = !!(flags & WF_WRAPSYM);
 	entry->modsym = !!(flags & WF_MODSYM);
@@ -468,7 +468,7 @@ static inline void log_posixtime(struct tls_info *tls, const char *sym,
 {
 	struct timespec posix_time = *end;
 	timespec_sub(&posix_time, start);
-	bt_printf(tls, "LOG:T:%s:%lu.%lu\n", sym,
+	bt_printf(tls, "LOG:T:%s:%lu.%lu", sym,
 		  (unsigned long)posix_time.tv_sec,
 		  (unsigned long)posix_time.tv_nsec);
 }
@@ -622,7 +622,7 @@ int __hidden wrap_special(struct tls_info *tls)
 static void flush_and_close(struct tls_info *tls)
 {
 	if (tls->info.should_log) {
-		bt_printf(tls, "LOG:I:CLOSE:%s(0x%x,0x%x,0x%x,0x%x):\n",
+		bt_printf(tls, "LOG:I:CLOSE:%s(0x%x,0x%x,0x%x,0x%x):",
 			  wsym(tls),
 			  tls->info.regs[0], tls->info.regs[1],
 			  tls->info.regs[2], tls->info.regs[3]);
@@ -666,7 +666,7 @@ int handle_prctl(struct tls_info *tls)
 
 	/* close this log file and open a new one with the new name! */
 	if (tls->info.should_log)
-		bt_printf(tls, "LOG:I:name=%s\n", name);
+		bt_printf(tls, "LOG:I:name=%s", name);
 	return 0;
 }
 
@@ -681,7 +681,7 @@ int handle_pth_setname(struct tls_info *tls)
 
 	/* close this log file and open a new one with the new name! */
 	if (tls->info.should_log)
-		bt_printf(tls, "LOG:I:name=%s\n", name);
+		bt_printf(tls, "LOG:I:name=%s", name);
 	return 0;
 }
 
@@ -790,7 +790,7 @@ int handle_exec(struct tls_info *tls)
 		setup_exec_env(tls);
 
 	if (info->should_log)
-		bt_printf(tls, "LOG:I:%s:%s:\n", info->symbol, (const char *)info->regs[0]);
+		bt_printf(tls, "LOG:I:%s:%s:", info->symbol, (const char *)info->regs[0]);
 
 	close_dvm_iface(&dvm);
 	flush_and_close(tls);
@@ -1006,7 +1006,7 @@ int handle_open(struct tls_info *tls)
 		char type = __get_path_type(path, rval);
 		set_fdtype(rval, type);
 		if (info->should_log)
-			bt_printf(tls, "LOG:I:fd(%d,%s)='%c':\n", rval, path, type);
+			bt_printf(tls, "LOG:I:fd(%d,%s)='%c':", rval, path, type);
 	}
 
 	ret = get_retmem(NULL);
@@ -1045,7 +1045,7 @@ int handle_opendir(struct tls_info *tls)
 		int dfd = libc.dirfd(rval);
 		set_fdtype(dfd, 'f');
 		if (info->should_log)
-			bt_printf(tls, "LOG:I:fd(%d,%s)='f':\n", dfd, path);
+			bt_printf(tls, "LOG:I:fd(%d,%s)='f':", dfd, path);
 	}
 
 	ret = get_retmem(NULL);
@@ -1084,7 +1084,7 @@ int handle_openat(struct tls_info *tls)
 		char type = __get_path_type(path, rval);
 		set_fdtype(rval, type);
 		if (info->should_log)
-			bt_printf(tls, "LOG:I:fd(%d,%s)='%c':\n", rval, path, type);
+			bt_printf(tls, "LOG:I:fd(%d,%s)='%c':", rval, path, type);
 	}
 
 	ret = get_retmem(NULL);
@@ -1125,7 +1125,7 @@ int handle_fopen(struct tls_info *tls)
 		char type = __get_path_type(path, fd);
 		set_fdtype(fd, type);
 		if (info->should_log)
-			bt_printf(tls, "LOG:I:fd(%d,%s)='%c':\n", fd, path, type);
+			bt_printf(tls, "LOG:I:fd(%d,%s)='%c':", fd, path, type);
 	}
 
 	ret = get_retmem(NULL);
@@ -1169,7 +1169,7 @@ int handle_dup(struct tls_info *tls)
 	if (rval >= 0) {
 		set_fdtype(rval, type);
 		if (info->should_log)
-			bt_printf(tls, "LOG:I:fd(%d)='%c':\n",
+			bt_printf(tls, "LOG:I:fd(%d)='%c':",
 				  rval, type ? type : '?');
 	}
 
@@ -1218,14 +1218,14 @@ int handle_socket(struct tls_info *tls)
 		/* socket pair returns values in sv */
 		set_fdtype(sv[0], type);
 		set_fdtype(sv[1], type);
-		if (info->should_log)
-			bt_printf(tls, "LOG:I:fd(%d)='%c':\n"
-				       "LOG:I:fd(%d)='%c':\n",
-				       sv[0], type, sv[1], type);
+		if (info->should_log) {
+			bt_printf(tls, "LOG:I:fd(%d)='%c':", sv[0], type);
+			bt_printf(tls, "LOG:I:fd(%d)='%c':", sv[1], type);
+		}
 	} else {
 		set_fdtype(rval, type);
 		if (info->should_log)
-			bt_printf(tls, "LOG:I:fd(%d)='%c':\n", rval, type);
+			bt_printf(tls, "LOG:I:fd(%d)='%c':", rval, type);
 	}
 
 out:
@@ -1266,10 +1266,10 @@ int handle_pipe(struct tls_info *tls)
 		if (rval == 0 && pfd) {
 			set_fdtype(pfd[0], 'P');
 			set_fdtype(pfd[1], 'P');
-			if (info->should_log)
-				bt_printf(tls, "LOG:I:fd(%d)='P'"
-					        ":LOG:I:fd(%d)='P':\n",
-					  pfd[0], pfd[1]);
+			if (info->should_log) {
+				bt_printf(tls, "LOG:I:fd(%d)='P'", pfd[0]);
+				bt_printf(tls, "LOG:I:fd(%d)='P'", pfd[1]);
+			}
 		}
 	} else if (info->symbol[1] == 'o') {
 		FILE *f;
@@ -1286,7 +1286,7 @@ int handle_pipe(struct tls_info *tls)
 			int fd = libc.fno(f);
 			set_fdtype(fd, 'p');
 			if (info->should_log)
-				bt_printf(tls, "LOG:I:fd(%d,%s)='p':\n",
+				bt_printf(tls, "LOG:I:fd(%d,%s)='p':",
 					  fd, (const char *)info->regs[0]);
 		}
 		rval = (uint32_t)f;
@@ -1331,7 +1331,7 @@ int handle_accept(struct tls_info *tls)
 	if (rval >= 0) {
 		set_fdtype(rval, 'S');
 		if (info->should_log)
-			bt_printf(tls, "LOG:I:fd(%d)='S':\n", rval);
+			bt_printf(tls, "LOG:I:fd(%d)='S':", rval);
 	}
 
 	ret = get_retmem(NULL);
@@ -1385,7 +1385,7 @@ int handle_closefd(struct tls_info *tls)
 	mtx_unlock(&fdtable_mutex);
 
 	if (info->should_log)
-		bt_printf(tls, "LOG:I:%s:fd(%d):\n", info->symbol, fd);
+		bt_printf(tls, "LOG:I:%s:fd(%d):", info->symbol, fd);
 	return 0;
 }
 
@@ -1412,7 +1412,7 @@ int handle_closefptr(struct tls_info *tls)
 	mtx_unlock(&fdtable_mutex);
 
 	if (info->should_log)
-		bt_printf(tls, "LOG:I:%s:fd(%d):\n", info->symbol, fd);
+		bt_printf(tls, "LOG:I:%s:fd(%d):", info->symbol, fd);
 
 	return 0;
 }
@@ -1430,7 +1430,7 @@ int handle_rename_fd1(struct tls_info *tls)
 	if (info->should_handle) {
 		/* print out the FD used in this call */
 		if (info->should_log)
-			bt_printf(tls, "LOG:I:%s:fd(%d):\n", info->symbol, fd);
+			bt_printf(tls, "LOG:I:%s:fd(%d):", info->symbol, fd);
 		return 0;
 	}
 
@@ -1646,7 +1646,7 @@ static int __handle_epoll_create(struct tls_info *tls)
 	if (epfd >= 0) {
 		set_fdtype(epfd, 'E');
 		if (info->should_log)
-			bt_printf(tls, "LOG:I:fd(%d)='E':\n", epfd);
+			bt_printf(tls, "LOG:I:fd(%d)='E':", epfd);
 	}
 	ret = get_retmem(NULL);
 	if (!ret)
@@ -1667,7 +1667,7 @@ static int __handle_epoll_ctl(struct tls_info *tls)
 	fd = (int)info->regs[2];
 
 	if (info->should_log)
-		bt_printf(tls, "LOG:I:%s fd(%d)='%c' %s epfd=%d:\n",
+		bt_printf(tls, "LOG:I:%s fd(%d)='%c' %s epfd=%d:",
 			  op == EPOLL_CTL_ADD ? "adding" :
 			    (op == EPOLL_CTL_DEL ? "deleting" : "??"),
 			  fd,

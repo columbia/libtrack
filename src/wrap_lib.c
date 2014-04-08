@@ -475,9 +475,9 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 				if (callstr)
 					__bt_raw_print(tls, callstr, slen);
 				else
-					bt_printf(tls, "CALL:%s\n", symbol);
+					bt_printf(tls, "CALL:%s", symbol);
 			} else {
-				bt_printf(tls, "CALL:%s:0x%x:0x%x:0x%x:0x%x:\n",
+				bt_printf(tls, "CALL:%s:0x%x:0x%x:0x%x:0x%x:",
 					  symbol, u32regs[0], u32regs[1],
 					  u32regs[2], u32regs[3]);
 			}

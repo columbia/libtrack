@@ -399,12 +399,12 @@ do_lookup:
 	std::string name;
 	name = dvm->dvmHumanReadableMethod(m, DVM_BT_GET_SIGNATURE);
 	if (cline) {
-		libc.snprintf(cline->str, MAX_LINE_LEN, "%s:\n", name.c_str());
+		libc.snprintf(cline->str, MAX_LINE_LEN, "%s:", name.c_str());
 		__bt_printf(tls, " :%d:%s", count, cline->str);
 		return;
 	}
 
-	__bt_printf(tls, " :%d:%s:\n", count, name.c_str());
+	__bt_printf(tls, " :%d:%s:", count, name.c_str());
 }
 
 extern "C"
@@ -415,19 +415,19 @@ void __hidden print_dvm_bt(struct tls_info *tls, struct dvm_iface *dvm,
 
 	ii = compare_traces(tls, dvm, dvm_bt);
 	if (ii < 0) {
-		__bt_printf(tls, "DVM:BT_REPEAT:1:\n");
+		__bt_printf(tls, "DVM:BT_REPEAT:1:");
 		return;
 	}
 	/* else if (ii > 1)
-		__bt_printf(tls, "DVM:BT_REPEAT:%d:\n", ii);
+		__bt_printf(tls, "DVM:BT_REPEAT:%d:", ii);
 	*/
 
-	bt_printf(tls, "DVM:BT_START:%d:\n", dvm_bt->count);
+	bt_printf(tls, "DVM:BT_START:%d:", dvm_bt->count);
 	for (ii = 0; ii < dvm_bt->count; ii++) {
 		print_dvm_sym(tls, dvm, ii, dvm_bt->mlist[ii]);
 	}
 
-	/* bt_printf(tls, "DVM:BT_END:\n"); */
+	/* bt_printf(tls, "DVM:BT_END:"); */
 	return;
 }
 #endif /* ANDROID */

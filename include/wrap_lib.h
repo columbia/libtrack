@@ -328,7 +328,7 @@ extern struct ret_ctx *get_retmem(struct tls_info *tls);
 		if (!tls) \
 			break; \
 		if (zlib.valid && tls->info.log_pos) { \
-			bt_printf(tls, fmt "\n", ## __VA_ARGS__); \
+			bt_printf(tls, fmt, ## __VA_ARGS__); \
 			bt_flush(tls, &(tls->info)); \
 		} else { \
 			log_print(tls->logfile, LOG, fmt, ## __VA_ARGS__ ); \
@@ -395,19 +395,27 @@ extern void __bt_raw_print(struct tls_info *tls,
  */
 #define __bt_printf(____tls, fmt, ...) \
 	do { \
-		int __ret, __len, __remain; \
-		uint8_t *__logpos = __bt_raw_print_start(____tls, 32, &__remain); \
+		int __ret, __len, __remain = 0; \
+		uint8_t *__logpos; \
+		__len = (____tls)->info.tv_strlen; \
+		__logpos = __bt_raw_print_start(____tls, __len + 64, &__remain); \
 		if (!__logpos) \
 			break; \
-		__len = libc.snprintf((char *)__logpos, __remain, fmt, ## __VA_ARGS__ ); \
+		libc.memcpy(__logpos, (____tls)->info.tv_str, __len); \
+		__len += libc.snprintf((char *)__logpos + __len, \
+				       __remain - __len, fmt "\n ", ## __VA_ARGS__ ); \
 		__ret = __bt_raw_maybe_finish(____tls, __len, __remain); \
 		if (__ret > 0) \
 			continue; \
 		break; \
 	} while (1)
 
+/*
+ * this separate macro used to be useful... it's still here so
+ * I don't have to change other code now :-)
+ */
 #define bt_printf(__tls, fmt, ...) \
-	__bt_printf(__tls, "%s" fmt, (__tls)->info.tv_str, ## __VA_ARGS__ )
+	__bt_printf(__tls, fmt, ## __VA_ARGS__ )
 
 #define _BUG(X) \
 	do { \

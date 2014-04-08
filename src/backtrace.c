@@ -223,7 +223,7 @@ _static void print_info(struct tls_info *tls, int count, void *sym)
 #ifdef OUTPUT_CACHE_STATS
 	if (cache &&
 	    ((cache->hit + cache->miss) % 1024 == 0))
-		__bt_printf(tls, " :CACHE_STATS:U[%d]:H[%d]:M[%d]\n",
+		__bt_printf(tls, " :CACHE_STATS:U[%d]:H[%d]:M[%d]",
 			    cache->usage, cache->hit, cache->miss);
 #endif
 
@@ -268,8 +268,8 @@ do_lookup:
 
 	if (cline) {
 		if (count > 0) {
-			libc.snprintf(cline->str, MAX_LINE_LEN,
-				      "%x:%s:%c0x%x:%s(%p):\n",
+			libc.snprintf(cline->str, MAX_LINE_LEN-1,
+				      "%x:%s:%c0x%x:%s(%p):",
 				      (unsigned int)sym, symname,
 				      c, ofst, dli.dli_fname, dli.dli_fbase);
 			__bt_printf(tls, " :%d:%s", count, cline->str);
@@ -279,7 +279,7 @@ do_lookup:
 			 * us to properly dynamically rename based on input
 			 */
 			libc.snprintf(cline->str, MAX_LINE_LEN,
-				      "%c0x%x:%s(%p):\n",
+				      "%c0x%x:%s(%p):",
 				      c, ofst, dli.dli_fname, dli.dli_fbase);
 			__bt_printf(tls, " :0:%x:%s:%s",
 				    (unsigned int)sym, symname, cline->str);
@@ -287,7 +287,7 @@ do_lookup:
 		return;
 	}
 
-	__bt_printf(tls, " :%d:0x%x:%s:%c0x%x:%s(%p):\n",
+	__bt_printf(tls, " :%d:0x%x:%s:%c0x%x:%s(%p):",
 		    count, (unsigned int)sym, symname,
 		    c, ofst, dli.dli_fname, dli.dli_fbase);
 }
@@ -300,13 +300,13 @@ _static void print_bt_state(struct tls_info *tls, struct bt_state *state)
 	char c;
 	const char *sym;
 
-	bt_printf(tls, "BT:START:%d:\n", state->count);
+	bt_printf(tls, "BT:START:%d:", state->count);
 	for (count = 0; count < state->count; count++) {
 		frame = &state->frame[count];
 		print_info(tls, count, frame->pc);
 #ifdef VERBOSE_FRAME_INFO
 		__br_printf(tls, " : :R0=0x%08x,R1=0x%08x,R2=0x%08x,"
-			     "R3=0x%08x,SP=0x%08x,LR=0x%08x\n",
+			     "R3=0x%08x,SP=0x%08x,LR=0x%08x:",
 			     frame->reg[0], frame->reg[1], frame->reg[2],
 			     frame->reg[3], frame->sp, frame->lr);
 #endif
@@ -487,7 +487,7 @@ unwind_backtrace(struct tls_info *tls)
 	 *     reset the stats and keep the PCs for next time
 	 */
 	if (*(info->last_stack_cnt) > 1)
-		bt_printf(tls, "BT:REPEAT:%d:\n", *(info->last_stack_cnt));
+		bt_printf(tls, "BT:REPEAT:%d:", *(info->last_stack_cnt));
 
 	*(info->last_stack_cnt) = 1;
 	*(info->last_stack_depth) = state.count;
@@ -502,7 +502,7 @@ unwind_backtrace(struct tls_info *tls)
 	stack_sz = (unsigned)state.frame[state.count-1].sp
 			+ WRAPPER_STACK_SZ
 			- (unsigned)info->stack;
-	bt_printf(tls, "BT:STACKMEM:%d:\n", stack_sz);
+	bt_printf(tls, "BT:STACKMEM:%d:", stack_sz);
 }
 
 void __hidden __attribute__((noinline))
