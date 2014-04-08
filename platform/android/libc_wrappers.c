@@ -52,15 +52,15 @@ static int handle_epoll(struct tls_info *tls);
 
 #define safe_call(TLS, ERR, CODE...) \
 	{ \
-		struct timeval tv_start, tv_end; \
+		struct timespec _start, _end; \
 		__clear_wrapping(); \
 		if ((TLS)->info.log_time) \
-			libc.gettimeofday(&tv_start, NULL); \
+			libc.clock_gettime(CLOCK_THREAD_CPUTIME_ID, &_start); \
 		CODE; \
 		if ((TLS)->info.log_time) { \
-			libc.gettimeofday(&tv_end, NULL); \
+			libc.clock_gettime(CLOCK_THREAD_CPUTIME_ID, &_end); \
 			log_posixtime(TLS, (TLS)->info.symbol, \
-				      &tv_start, &tv_end); \
+				      &_start, &_end); \
 			(TLS)->info.log_time = 0; \
 		} \
 		ERR = *__errno(); \
@@ -453,45 +453,24 @@ void __hidden setup_wrap_cache(void)
 	add_entry("clock_gettime", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
 }
 
-/*
- * Code taken from:
- * http://www.gnu.org/software/libc/manual/html_node/Elapsed-Time.html
- *
- * result = X - Y
- */
-static inline int timeval_subtract(struct timeval *result,
-				   struct timeval *x,
-				   struct timeval *y)
+static inline void timespec_sub(struct timespec *a, const struct timespec *b)
 {
-	/* Perform the carry for the later subtraction by updating y. */
-	if (x->tv_usec < y->tv_usec) {
-		int nsec = (y->tv_usec - x->tv_usec) / 1000000 + 1;
-		y->tv_usec -= 1000000 * nsec;
-		y->tv_sec += nsec;
+	a->tv_sec  -= b->tv_sec;
+	a->tv_nsec -= b->tv_nsec;
+	if (a->tv_nsec < 0) {
+		a->tv_nsec += 1000000000;
+		a->tv_sec  -= 1;
 	}
-	if (x->tv_usec - y->tv_usec > 1000000) {
-		int nsec = (x->tv_usec - y->tv_usec) / 1000000;
-		y->tv_usec += 1000000 * nsec;
-		y->tv_sec -= nsec;
-	}
-
-	/* Compute the time remaining to wait.
-	   tv_usec is certainly positive. */
-	result->tv_sec = x->tv_sec - y->tv_sec;
-	result->tv_usec = x->tv_usec - y->tv_usec;
-
-	/* Return 1 if result is negative. */
-	return x->tv_sec < y->tv_sec;
 }
 
 static inline void log_posixtime(struct tls_info *tls, const char *sym,
-				 struct timeval *tv_start, struct timeval *tv_end)
+				 struct timespec *start, struct timespec *end)
 {
-	struct timeval posix_time;
-	timeval_subtract(&posix_time, tv_end, tv_start);
+	struct timespec posix_time = *end;
+	timespec_sub(&posix_time, start);
 	bt_printf(tls, "LOG:T:%s:%lu.%lu\n", sym,
 		  (unsigned long)posix_time.tv_sec,
-		  (unsigned long)posix_time.tv_usec);
+		  (unsigned long)posix_time.tv_nsec);
 }
 
 /**
@@ -505,8 +484,8 @@ static inline void log_posixtime(struct tls_info *tls, const char *sym,
 uint32_t wrapped_return(void)
 {
 	/* record this ASAP */
-	struct timeval end_tv;
-	libc.gettimeofday(&end_tv, NULL);
+	struct timespec posix_end;
+	libc.clock_gettime(CLOCK_THREAD_CPUTIME_ID, &posix_end);
 
 	{
 		struct tls_info *tls;
@@ -521,7 +500,7 @@ uint32_t wrapped_return(void)
 		if (tls->info.log_time) {
 			rval = 0; /* handled by arch_wrapped_return */
 			log_posixtime(tls, ret->sym,
-				      &ret->posix_start, &end_tv);
+				      &ret->posix_start, &posix_end);
 			tls->info.log_time = 0;
 		} else {
 			err = ret->_errno;
