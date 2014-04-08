@@ -600,6 +600,7 @@ int __hidden init_libc_iface(struct libc_iface *iface, const char *dso_path)
 	init_sym(iface, 1, malloc,);
 	init_sym(iface, 1, free,);
 	init_sym(iface, 1, gettimeofday,);
+	init_sym(iface, 1, clock_gettime,);
 	init_sym(iface, 1, setenv,);
 	init_sym(iface, 1, getenv,);
 

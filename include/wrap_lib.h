@@ -139,6 +139,7 @@ struct libc_iface {
 	int (*setenv)(const char *name, const char *value, int overwrite);
 
 	int (*gettimeofday)(struct timeval *tp, void *tzp);
+	int (*clock_gettime)(int , struct timespec *tm);
 
 	int (*sigaction)(int sig, const struct sigaction *act,
 			 struct sigaction *oact);
