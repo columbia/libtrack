@@ -542,6 +542,7 @@ __bt_raw_print_start(struct tls_info *tls, int prlen, int *remain_r)
 	remain = LOG_BUFFER_SIZE - *log_pos - 1;
 	if (remain < prlen) {
 		bt_flush(tls, &tls->info);
+		log_pos = tls->info.log_pos;
 		remain = LOG_BUFFER_SIZE - *log_pos - 1;
 		if (remain < prlen) { /* never going to fit... */
 			log_print(tls->logfile, LOG, "E:TRUNCATED!");

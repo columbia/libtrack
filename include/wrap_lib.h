@@ -339,16 +339,17 @@ extern struct ret_ctx *get_retmem(struct tls_info *tls);
 #define log_flush(f) \
 	if (f) { \
 		if (zlib.valid) \
-			zlib.gzflush((struct gzFile *)(f), Z_SYNC_FLUSH); \
+			; /* zlib.gzflush((struct gzFile *)(f), Z_SYNC_FLUSH); */ \
 		else \
 			libc.fflush((FILE *)f); \
 	}
 
 #define log_close(f) \
 	if (f) { \
-		if (zlib.valid) \
+		if (zlib.valid) { \
+			zlib.gzflush((struct gzFile *)f, Z_FINISH); \
 			zlib.gzclose((struct gzFile *)f); \
-		else \
+		} else \
 			libc.fclose((FILE *)(f)); \
 	}
 
@@ -360,14 +361,18 @@ extern struct ret_ctx *get_retmem(struct tls_info *tls);
 
 
 #define __bt_flush(logfile, logbuffer, pos) \
-{ \
-	((uint8_t *)(logbuffer))[*pos] = 0; \
-	if (zlib.valid) \
-		zlib.gzwrite((struct gzFile *)(logfile), (logbuffer), *(pos)); \
-	else \
+do { \
+	int prlen = *(pos); \
+	((uint8_t *)(logbuffer))[prlen] = 0; \
+	if (zlib.valid) { \
+		zlib.gzwrite((struct gzFile *)(logfile), (logbuffer), prlen); \
+		/* I swear there's a bug in libz's gzwrite() - this extra call \
+		 * seems to make it better, but still not OK... */ \
+		zlib.gzwrite((struct gzFile *)(logfile), " ", 1); /* why?!?! */ \
+	} else \
 		libc.fwrite((logbuffer), *(pos), 1, (FILE *)(logfile)); \
 	*(pos) = 0; \
-}
+} while (0)
 
 #define bt_flush(tls, info) \
 	if ((tls) && (tls)->logfile && (info)->log_pos && *((info)->log_pos) > 0) \
