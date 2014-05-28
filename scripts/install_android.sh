@@ -87,7 +87,8 @@ fi
 echo ""
 echo "I am about to overwrite ${target_lib}!"
 echo -n "Are you sure it's OK? [y|N]: "
-read ans
+ans="y"
+#read ans
 
 if [ ! "${ans:0:1}" = "y" -a ! "${ans:0:1}" = "Y" ]; then
 	echo "OK, I didn't replace anything :-)"
