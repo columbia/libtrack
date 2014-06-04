@@ -261,7 +261,7 @@ ENTRY(_marg(\pfx,$2)_marg(\wrapsym,$1))
 5:	/* call any defined "tracing" function */
 #ifdef WRAP_TRACE_FUNC
 	/* prototype:
-	   void wrapper(const char *symbol, void *symptr,
+	   void wrapped_tracer(const char *symbol, void *symptr,
 			void *regs, void *stack);
 	 */
 	symaddr r0, marg(__wrapstr_,\wrapsym,$1)
