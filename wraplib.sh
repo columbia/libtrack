@@ -18,6 +18,7 @@ TOOL_PFX=${CROSS_COMPILE:-arm-eabi-}
 
 FILE=`which file`
 OTOOL=`which otool`
+COMM=`which comm`
 SED=`which gsed`
 ELF_OBJDUMP=`which ${TOOL_PFX}objdump`
 ELF_READELF=`which ${TOOL_PFX}readelf`
@@ -31,7 +32,7 @@ if [ -z "$FILE" ]; then
 	echo "WARNING: Can't find 'file' utility be sure to specify the library type!"
 fi
 
-ARCH=android
+#ARCH=android
 
 WRAPALL=0
 WRAPPRIO=2
@@ -47,7 +48,7 @@ LIBPFX=real_
 function usage() {
 	echo -e "Usage: $0 --lib path/to/library "
 	echo -e "                          [--wrap-all]"
-	echo -e "                          [--arch {android|arm|x86}]"
+	echo -e "                          [--arch {arm|armv7}]"
 	echo -e "                          [--type {elf|macho}]"
 	echo -e "                          [--out path/to/output/dir]"
 	echo -e "                          [--use-ndk]"
@@ -56,17 +57,20 @@ function usage() {
 	echo -e "\t--wrap-prio [1|2]               1 = \"always wrap\" functions take priority"
 	echo -e "\t                                2 = \"never wrap\" functions take priority"
 	echo -e "\t                                (default: 2)"
-	echo -e "\t--arch {android|arm|x86}        Architecture for syscall wrappers"
+	echo -e "\t--arch {arm|armv7}        Architecture for syscall wrappers"
 	echo -e "\t--lib path/to/library           Library (or directory of libraries) to search for syscalls"
 	echo -e ""
 	echo -e "\t--type {elf|macho}              Specify the type of input library (avoid auto-detection)"
 	echo -e ""
 	echo -e "\t--out output/dir                Directory to put output C wrappers (defaults to .)"
 	echo -e ""
+	echo -e "\t--use-ndk                       Use ndk for your build"
+
+    echo -e ""
 	echo -e "Environment variables:"
 	echo -e "\tCROSS_COMPILE                   Used to properly dump ELF objects. Defaults to 'arm-eabi-'"
 	echo -e ""
-	exit 1
+	exit -1
 }
 
 #
@@ -85,18 +89,14 @@ while [[ ! -z "$1" ]]; do
 			if [ "$2" = "1" -o "$2" = "2" ]; then
 				WRAPPRIO=$2
 			else
-				echo "E:"
 				echo "E: Invalid priority!"
-				echo "E:"
 				usage
 			fi
 			shift
 			;;
 		--arch )
-			if [ "$2" != "android" ]; then
-				echo "E:"
-				echo "E: Architectures other than 'android' are not yet supported!"
-				echo "E:"
+			if [ "$2" != "arm"  -a "$2" != "armv7" ]; then
+				echo "E: Architectures other than 'arm' and 'arv7' are not yet supported!"
 				usage
 			fi
 			ARCH="$2"
@@ -109,9 +109,7 @@ while [[ ! -z "$1" ]]; do
 			elif [ -f "$2" ]; then
 				LIB=$2
 			else
-				echo "E:"
 				echo "E: Invalid lib parameter: '$2'"
-				echo "E:"
 				usage
 			fi
 			shift
@@ -146,9 +144,7 @@ if [ -z "$LIB" -a -z "$LIBDIR" ]; then
 fi
 
 if [ -z "$LIBTYPE" -a ! -z "$LIBDIR" ]; then
-	echo ""
-	echo "You must specify a library type with --type when processing a directory!"
-	echo ""
+	echo "E: You must specify a library type with --type when processing a directory!"
 	usage
 fi
 
@@ -170,30 +166,31 @@ fi
 if [ "$LIBTYPE" = "macho" ]; then
 	STRIP=`which strip`
 	if [ -z "$OTOOL" -o ! -x "$OTOOL" ]; then
-		echo "Can't find otool in your path - have you installed the command-line Developer tools?"
-		exit 2
+		echo "E: Can't find otool in your path - have you installed the command-line Developer tools?"
+		exit -1
+	fi
+    if [ -z "$COMM" -o ! -x "$COMM" ]; then
+		echo "E: Can't find comm in your path."
+		exit -1
 	fi
 elif [ "$LIBTYPE" = "elf" ]; then
 	STRIP="${CDIR}/elfmod/elfmod.py"
 	if [ -z "$ELF_OBJDUMP" -o ! -x "$ELF_OBJDUMP" ]; then
-		echo "Can't find ${TOOL_PFX}objdump in your path."
-		exit 2
+		echo "E: Can't find ${TOOL_PFX}objdump in your path."
+		exit -1
 	fi
 	if [ -z "$ELF_READELF" -o ! -x "$ELF_READELF" ]; then
-		echo "Can't find ${TOOL_PFX}readelf in your path."
-		exit 2
+		echo "E: Can't find ${TOOL_PFX}readelf in your path."
+		exit -1
 	fi
 fi
 
 if [ -z "$STRIP" -o ! -x "${STRIP}" ]; then
-	echo "ERROR: Can't find '${STRIP}' in your path!"
-	exit 2
+	echo "E: Can't find '${STRIP}' in your path!"
+	exit -1
 fi
 
 
-tf_code=
-tf_syscalls=
-tf_funclist=
 declare -a SYSCALLS=( )
 SYSCALLS_SEQ=
 declare -a FUNCTIONS=( )
@@ -202,50 +199,66 @@ declare -a DUP_SYM_SEQ_A=( )
 DUP_SYMS_SEQ=
 
 function extract_code() {
-	echo -e "\tdisassembling..."
+    local in=$1
+    local out=$2
+	if [ ! -f "$in" ]; then
+            echo "E: Missing $in"
+            exit -1
+    fi
+    echo -e "\tdisassembling..."
 	if [ "$LIBTYPE" = "elf" ]; then
-		${ELF_OBJDUMP} -d "$1" > "$tf_code"
+		${ELF_OBJDUMP} -d "$in" > "$out"
 	elif [ "$LIBTYPE" = "macho" ]; then
-		${OTOOL} -tV "$1" > "$tf_code"
+        local libarch="-arch $ARCH"
+        ${OTOOL} $libarch -tV "$in" > "$out"
 	else
-		echo "E:"
 		echo "E: unsupported lib type:'$LIBTYPE'"
-		echo "E:"
-		exit 1
+		exit -1
 	fi
 }
 
 #
-# Locate all syscalls in a given library
+# Locate all entry-points in a ELF or Mach-O binary that are
+# syscall wrappers and mark them as syscalls if they are not
+# black-listed in the POSIX API list.
 #
 function extract_syscalls() {
+    local tf_code="$1"
+    local tf_syscalls="$2"
 	echo -e "\textracting syscalls..."
 	local extract_pl="${CDIR}/scripts/${LIBTYPE}_${ARCH}_syscalls.pl"
 	if [ ! -f "$extract_pl" ]; then
-		echo "E:"
 		echo "E: missing syscall extraction perl script: '$extract_pl'"
-		echo "E:"
+        exit -1
 	fi
 	SYSCALLS=( $(cat "$tf_code" | "$extract_pl" -prio ${WRAPPRIO}) )
 	SYSCALLS_SEQ="$(seq 0 $((${#SYSCALLS[@]}-1)))"
 
 	echo -n "" > "$tf_syscalls"
 	for s in $SYSCALLS_SEQ; do
-		sc=${SYSCALLS[$s]#*:}
+        sc=${SYSCALLS[$s]#*:}
 		echo "$sc" >> "$tf_syscalls"
 	done
 }
 
+#
+# Locate all entry-points in a ELF or Mach-O binary that are
+# in the POSIX API list and mark them as syscalls. Also, mark
+# those that  are not in the list but are branching to an
+# entry-point previously  marked as syscall.
+#
 function extract_syscall_tree() {
+    local tf_code="$1"
+    local tf_syscalls="$2"
 	echo -e "\textracting intra-library syscall tree..."
 	local extract_pl="${CDIR}/scripts/${LIBTYPE}_${ARCH}_syscall_tree.pl"
 	if [ ! -f "$extract_pl" ]; then
-		echo "E:"
 		echo "E: missing syscall extraction perl script: '$extract_pl'"
-		echo "E:"
+        exit -1
 	fi
 	SYSCALLS+=( $("$extract_pl" -prio ${WRAPPRIO} "$tf_code" "$tf_syscalls") )
 	SYSCALLS_SEQ="$(seq 0 $((${#SYSCALLS[@]}-1)))"
+    #echo Syscalls: ${#SYSCALLS[@]}
 }
 
 function find_dup_elf_symbols() {
@@ -256,7 +269,7 @@ function find_dup_elf_symbols() {
 	local addr=
 	local prev_func=
 	local func=
-	echo -e -n "\tfinding duplicate symbols..."
+	echo -e -n "\tsearching dynamic symbol table for duplicate symbols..."
 	declare -a syms=( )
 
 	sym_idx=0
@@ -362,7 +375,7 @@ __EOF
 		platform/${ARCH}/\$(TARGET_ARCH)/crtend_so.S
 __EOF
 )
-	if [ "${ARCH}" = "android" ]; then
+	if [ "${ARCH}" = "arm" ]; then
 		if [ "${LIB}" = "libc.so" ]; then
 			src_files=$(cat <<-__EOF
 $src_files \\
@@ -380,7 +393,7 @@ __EOF
 )
 		fi
 	fi
-	if [ "${ARCH}" = "android" -o "${ARCH}" = "arm" ]; then
+	if [ "${ARCH}" = "arm" -o "${ARCH}" = "armv7" ]; then
 		c_flags=$(cat <<-__EOF
 $c_flags \\
 		-DHAVE_SIGHANDLER \\
@@ -407,7 +420,7 @@ __EOF
 
 	# We have a special wrapper return handling function
 	# on ARM Android that we hook in here
-	if [ "${ARCH}" = "android" ]; then
+	if [ "${ARCH}" = "arm" ]; then
 		extra_S_hdr="#define WRAP_RETURN_FUNC wrapped_return"
 	fi
 
@@ -580,13 +593,13 @@ function is_syscall() {
 }
 
 __SHOULD_WRAP=0
-function should_wrap_arm_macho() {
+function should_wrap_armv7_macho() {
 	local fcn="$1"
 	__SHOULD_WRAP=1
 	return
 }
 
-function should_wrap_android_elf() {
+function should_wrap_arm_elf() {
 	local fcn="$1"
 	local plt_RE='.*[.@]plt$';
 
@@ -637,10 +650,13 @@ function macho_functions() {
 		fi
 	done
 	echo -e "\t    (found ${#entries[@]} Mach-O entry points, ${#FUNCTIONS[@]} non-syscall)"
+    #TODO:
+    #Duplicate MachO symbols?
 }
 
 #
-# Find entry points in an ELF binary
+# Find entry points in an ELF binary that are not
+# syscalls and mark them as functions.
 #
 function elf_functions() {
 	local lib="$1"
@@ -671,9 +687,8 @@ function extract_functions() {
 	elif [ "$LIBTYPE" = "macho" ]; then
 		macho_functions "$libname"
 	else
-		echo "E:"
 		echo "E: unsupported library type '$LIBTYPE'"
-		echo "E:"
+        exit -1
 	fi
 }
 
@@ -685,11 +700,14 @@ function strip_elf_library() {
 	local symtable="$3"
 	local _soname="$(basename $1)"
 	local soname=${_soname:1}
+    local tf_funclist="${CDIR}/.$$.$RANDOM.funclist.tmp"
 
-	# Copy the input file, and modify the output file in-place
+    # Copy the input file, and modify the output file in-place
 	cp "$in" "$out"
 
-	# get a list of all the function symbols (including weakly defined symbols)
+	# Get a list of all the dynamic function symbols (including weakly defined symbols)
+    # NOTE: grep for .text to include only dynamic symbols that are defined
+    # within current shared object.
 	${ELF_OBJDUMP} -T "$out" | grep "DF\s\+\.text\s\+" \
 			| awk -F' ' '{print $6}' > "${tf_funclist}"
 
@@ -759,15 +777,14 @@ function strip_library() {
 	elif [ "$LIBTYPE" = "macho" ]; then
 		strip_macho_library "$libname" "$outname" "$symfile"
 	else
-		echo "E:"
 		echo "E: unsupported library type '$LIBTYPE'"
-		echo "E:"
+        exit -1
 	fi
 }
 
 LIB_BASE=
 if [ "$LIBTYPE" = "elf" ]; then
-	if [ "$ARCH" = "android" ]; then
+	if [ "$ARCH" = "arm" ]; then
 		LIB_BASE="/system/lib"
 	else
 		LIB_BASE="/lib"
