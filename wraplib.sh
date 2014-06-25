@@ -379,8 +379,8 @@ __EOF
 		if [ "${LIB}" = "libc.so" ]; then
 			src_files=$(cat <<-__EOF
 $src_files \\
-		platform/android/libc_wrappers.c \\
-		platform/android/libc_init.cpp
+		platform/${ARCH}/libc_wrappers.c \\
+		platform/${ARCH}/libc_init.cpp
 __EOF
 )
 			c_flags=$(cat <<-__EOF
@@ -470,9 +470,9 @@ __EOF
 	if [ ! -z "$USE_NDK" ]; then
 		ANDROID_MK=$(cat -<<__EOF
 $ANDROID_MK
-LOCAL_CFLAGS += -I\$(LOCAL_PATH)/platform/android/\$(TARGET_ARCH)/include \\
+LOCAL_CFLAGS += -I\$(LOCAL_PATH)/platform/${ARCH}/\$(TARGET_ARCH)/include \\
 		-I\$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include \\
-		-I\$(LOCAL_PATH)/platform/android/\$(TARGET_ARCH)/include \\
+		-I\$(LOCAL_PATH)/platform/${ARCH}/\$(TARGET_ARCH)/include \\
 		-DUSE_NDK=1
 LOCAL_LDFLAGS += -nostdlib -Wl,-nostdlib -Wl,-ldl
 __EOF
@@ -480,14 +480,14 @@ __EOF
 	else
 		ANDROID_MK=$(cat -<<__EOF
 $ANDROID_MK
-LOCAL_C_INCLUDES := \$(LOCAL_PATH)/platform/android/\$(TARGET_ARCH)/include \\
+LOCAL_C_INCLUDES := \$(LOCAL_PATH)/platform/${ARCH}/\$(TARGET_ARCH)/include \\
 		\$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include \\
 		external/stlport/stlport \\
 		bionic \\
 		bionic/libstdc++/include
 LOCAL_ASFLAGS += -fPIC \\
 		-I\$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include \\
-		-I\$(LOCAL_PATH)/platform/android/\$(TARGET_ARCH)/include
+		-I\$(LOCAL_PATH)/platform/${ARCH}/\$(TARGET_ARCH)/include
 LOCAL_NO_CRT := true
 __EOF
 )
@@ -522,7 +522,7 @@ __EOF
 	ln -s "${CDIR}/arch" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/platform" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/scripts/Makefile.${ARCH}" "${dir}/Makefile" 2>/dev/null
-	if [ "${ARCH}" = "android" ]; then
+	if [ "${ARCH}" = "arm" ]; then
 		echo -e "${ANDROID_MK}" > "${dir}/Android.mk"
 	fi
 
