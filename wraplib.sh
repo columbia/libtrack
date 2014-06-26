@@ -714,11 +714,13 @@ function strip_elf_library() {
 	# Save the size of the text section
 	${ELF_READELF} -t "$out" | grep -A1 "\.text" | tail -1 | awk '{print "TEXT_SIZE(0x"$4")"}' > "${symtable}"
 
-	# Extract a non-function symbol and remember its name and address
-	${ELF_READELF} -s "$out" | grep -v FUNC | grep -v UND \
-			| tail -n +4 | head -1 \
+    # Extract a non-function symbol and remember its name and address.
+    # This will be used to find the address where the binary will be loaded.
+    ${ELF_READELF} -s "$out" | grep -v FUNC | grep -v UND \
+			| grep GLOBAL | head -1 \
 			| awk '{print "SAVED(0x"$2","$8")"}' >> "${symtable}"
 
+    echo -e "\tHidding "$(wc -l ${tf_funclist} | $SED 's,\s.*,,g')" symbols in file "$out"."
 	# The 'STRIP' variable here points to our custom 'elfmod.py' script
 	# that modifies ELF libraries in-place
 	${STRIP} hidesyms "$out" "${tf_funclist}" >> "${symtable}"
