@@ -734,6 +734,7 @@ function strip_elf_library() {
 	# Modify the SONAME of the output library to avoid name collisions
 	# libdoes_stuff.so -> _ibdoes_stuff_so
 	${STRIP} soname "$out" "_${soname//./_}"
+    rm ${tf_funclist}
 }
 
 function strip_macho_library() {
@@ -803,7 +804,6 @@ fi
 
 tf_code="${CDIR}/.$$.$RANDOM.code.tmp"
 tf_syscalls="${CDIR}/.$$.$RANDOM.syscalls.tmp"
-tf_funclist="${CDIR}/.$$.$RANDOM.funclist.tmp"
 
 if [ -z "${LIB}" -a -d "${LIBDIR}" ]; then
 	ALL_LIBS=
@@ -855,4 +855,3 @@ fi
 
 rm -f "$tf_code"
 rm -f "$tf_syscalls"
-rm -f "$tf_funclist"
