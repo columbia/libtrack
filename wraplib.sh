@@ -201,14 +201,14 @@ DUP_SYMS_SEQ=
 function extract_code() {
     local in=$1
     local out=$2
-	if [ ! -f "$in" ]; then
+    if [ ! -f "$in" ]; then
             echo "E: Missing $in"
             exit -1
     fi
     echo -e "\tdisassembling..."
 	if [ "$LIBTYPE" = "elf" ]; then
 		${ELF_OBJDUMP} -d "$in" > "$out"
-	elif [ "$LIBTYPE" = "macho" ]; then
+    elif [ "$LIBTYPE" = "macho" ]; then
         local libarch="-arch $ARCH"
         ${OTOOL} $libarch -tV "$in" > "$out"
 	else
@@ -273,7 +273,8 @@ function find_dup_elf_symbols() {
 	declare -a syms=( )
 
 	sym_idx=0
-	${ELF_OBJDUMP} -T "$lib" | grep ' g ' | grep .text | sort > "$tmpfile"
+	# Get a list of all the dynamic function symbols (excluding weakly defined symbols)
+    ${ELF_OBJDUMP} -T "$lib" | grep ' g ' | grep .text | sort > "$tmpfile"
 	while read -r line; do
 		if [[ $line =~ $RE_line ]]; then
 			addr="${BASH_REMATCH[1]}"
@@ -837,10 +838,10 @@ else
 	fi
 	_l_out="${_l_symdir}/${_l}"
 	_l_real="${_l_symdir}/${LIBPFX}${_l}"
-	extract_code "$LIB"
+	extract_code "$LIB" "$tf_code"
 	if [ $WRAPALL -eq 0 ]; then
-		extract_syscalls "$LIB"
-		extract_syscall_tree
+		extract_syscalls "$LIB" "$tf_syscalls"
+		extract_syscall_tree "$tf_code" "$tf_syscalls"
 	fi
 	extract_functions "$LIB"
 	strip_library "$LIB" "${_l_real}" "${_l_symdir}/real_syms.h"
