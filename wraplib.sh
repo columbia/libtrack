@@ -354,51 +354,52 @@ function write_sym() {
 FILE_HEADER=
 FILE_FOOTER=
 function __setup_wrapped_lib() {
-	local dir="$1"
+    local linebreak=" \\"
+    local dir="$1"
 	local asm="$2"
 	local module_name="$(basename "${asm%.*}")_wrapped"
 
 	local extra_S_hdr=
 
 	local c_flags=$(cat <<-__EOF
-		-fPIC -O3 \\
-		-DHAVE_ARM_TLS_REGISTER \\
-		-DANDROID_SMP=1 \\
-		-fno-stack-protector \\
-		-Werror \\
-		-DLIBNAME=${LIB} -D_IBNAM_=$(basename ${LIBPATH})
+-fPIC -O3 $linebreak
+        -DHAVE_ARM_TLS_REGISTER $linebreak
+        -DANDROID_SMP=1 $linebreak
+        -fno-stack-protector $linebreak
+        -Werror $linebreak
+        -DLIBNAME=${LIB} -D_IBNAM_=$(basename ${LIBPATH})
 __EOF
 )
 	local src_files=$(cat <<-__EOF
-		platform/${ARCH}/crtbegin_so.c \\
-		$(basename "$asm") \\
-		$(ls -1 "${CDIR}/src" | awk '{print $0 " \\"}')
-		platform/${ARCH}/\$(TARGET_ARCH)/crtend_so.S
+        platform/${ARCH}/crtbegin_so.c $linebreak
+        $(basename "$asm") $linebreak
+$(ls -1 "${CDIR}/src" | awk '{print "\t\t" $0 " \\"}')
+        platform/${ARCH}/\$(TARGET_ARCH)/crtend_so.S
 __EOF
 )
 	if [ "${ARCH}" = "arm" ]; then
 		if [ "${LIB}" = "libc.so" ]; then
 			src_files=$(cat <<-__EOF
-$src_files \\
-		platform/${ARCH}/libc_wrappers.c \\
-		platform/${ARCH}/libc_init.cpp
+$src_files $linebreak
+        platform/${ARCH}/libc_wrappers.c $linebreak
+        platform/${ARCH}/libc_init.cpp
 __EOF
 )
 			c_flags=$(cat <<-__EOF
-$c_flags \\
-		-D_LIBC=1 \\
-		-DHAVE_WRAP_SPECIAL \\
-		-DCRT_LEGACY_WORKAROUND \\
-		-DPTHREAD_DEBUG -DPTHREAD_DEBUG_ENABLED=0
+$c_flags $linebreak
+        -D_LIBC=1 $linebreak
+        -DHAVE_WRAP_SPECIAL $linebreak
+        -DCRT_LEGACY_WORKAROUND $linebreak
+        -DPTHREAD_DEBUG -DPTHREAD_DEBUG_ENABLED=0
 __EOF
 )
 		fi
 	fi
 	if [ "${ARCH}" = "arm" -o "${ARCH}" = "armv7" ]; then
-		c_flags=$(cat <<-__EOF
-$c_flags \\
-		-DHAVE_SIGHANDLER \\
-		-marm -mno-thumb-interwork
+		ic_flags=$(cat <<-__EOF
+$c_flags $linebreak
+        -DHAVE_SIGHANDLER $linebreak
+        -marm -mno-thumb-interwork
 __EOF
 )
 	fi
@@ -408,13 +409,13 @@ __EOF
 	# (where LIBNAME includes the extention, e.g., .so or .dylib)
 	if [ -f "${CDIR}/platform/${ARCH}/${LIB}.c" ]; then
 		c_flags=$(cat <<-__EOF
-$c_flags \\
-		-DHAVE_WRAP_SPECIAL
+$c_flags $linebreak
+        -DHAVE_WRAP_SPECIAL
 __EOF
 )
 		src_files=$(cat <<-__EOF
-$src_files \\
-		platform/${ARCH}/${LIB}.c
+$src_files $linebreak
+        platform/${ARCH}/${LIB}.c
 __EOF
 )
 	fi
@@ -468,27 +469,31 @@ LOCAL_WHOLE_STATIC_LIBRARIES :=
 LOCAL_SYSTEM_SHARED_LIBRARIES :=
 __EOF
 )
+
 	if [ ! -z "$USE_NDK" ]; then
-		ANDROID_MK=$(cat -<<__EOF
+ANDROID_MK=$(cat -<<__EOF
 $ANDROID_MK
-LOCAL_CFLAGS += -I\$(LOCAL_PATH)/platform/${ARCH}/\$(TARGET_ARCH)/include \\
-		-I\$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include \\
-		-I\$(LOCAL_PATH)/platform/${ARCH}/\$(TARGET_ARCH)/include \\
-		-DUSE_NDK=1
-LOCAL_LDFLAGS += -nostdlib -Wl,-nostdlib -Wl,-ldl
+LOCAL_CFLAGS += -I\$(LOCAL_PATH)/platform/${ARCH}/\$(TARGET_ARCH)/include $linebreak
+        -I\$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include $linebreak
+        -I\$(LOCAL_PATH)/platform/${ARCH}/\$(TARGET_ARCH)/include $linebreak
+        -DUSE_NDK=1
+LOCAL_LDFLAGS += -nostdlib $linebreak
+        -Wl,-nostdlib -Wl,-ldl
 __EOF
 )
 	else
 		ANDROID_MK=$(cat -<<__EOF
 $ANDROID_MK
-LOCAL_C_INCLUDES := \$(LOCAL_PATH)/platform/${ARCH}/\$(TARGET_ARCH)/include \\
-		\$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include \\
-		external/stlport/stlport \\
-		bionic \\
-		bionic/libstdc++/include
-LOCAL_ASFLAGS += -fPIC \\
-		-I\$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include \\
-		-I\$(LOCAL_PATH)/platform/${ARCH}/\$(TARGET_ARCH)/include
+
+
+LOCAL_C_INCLUDES := \$(LOCAL_PATH)/platform/${ARCH}/\$(TARGET_ARCH)/include $linebreak
+        \$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include $linebreak
+        external/stlport/stlport $linebreak
+        bionic $linebreak
+        bionic/libstdc++/include
+LOCAL_ASFLAGS += -fPIC $linebreak
+        -I\$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include $linebreak
+        -I\$(LOCAL_PATH)/platform/${ARCH}/\$(TARGET_ARCH)/include
 LOCAL_NO_CRT := true
 __EOF
 )
