@@ -627,6 +627,8 @@ int __hidden init_libc_iface(struct libc_iface *iface, const char *dso_path)
 		void *sym = dlsym(iface->dso, "__progname");
 		if (sym)
 			progname = *(const char **)sym;
+		else
+			progname = "noprogname";
 	}
 
 #undef init_sym
