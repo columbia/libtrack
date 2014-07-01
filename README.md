@@ -68,3 +68,31 @@ All entry points to libsqlite will be logged. Output project will be placed in
 
     ./wraplib.sh --lib path/to/libsqlite.so --wrap-all --arch android --out sql --use-ndk
 
+
+### wraplib.sh Description
+
+1. Disassemble text section of an ELF or Mach-O binary.
+
+2. Parse dissasembled text section to extract and mark as syscalls entry-points that invoke
+a system calls using "SVC" command. By default entry-points that are not black-listed will
+be marked as syscalls, while black-listed entry-points, such as string related functions,
+will be dropped.
+
+3. Parse dissasembled text section to extract and mark as syscalls entry-point belonging to
+intra-syscalls tree, i.e., entry-points with branches targeting previously identified entry-points
+that are known to invoke system calls. Also, mark as syscalls all entry-points that match a
+static index of POSIX symbols. Similarly to step 2., drop all black-listed symbols.
+
+4. Extract collectivelly all entry-points defined in text section, except @plt symbols, and mark
+them as functions if they have not been marked as syscalls in steps (2), (3). If !SHOULD\_WRAP
+ignore those symbols.
+
+5. Get all symbols names exported via the dynamic symbol table (excluding weak syms) and identify
+duplicate function definitions, i.e., diffent symbols refering to the same address in the text.
+
+6. Get all symbol names exported via the dynamic symbol table (including weak syms) that are
+functions defined in the text section of the binary and change their visibility into "hidden"
+(ELF) or strip them (Mach-O)
+
+7. Create a file with assembly macros to WRAP entry-points marked a syscalls, and PASS entry-points
+marked as functions.
