@@ -202,7 +202,7 @@ function extract_code() {
     local in=$1
     local out=$2
     if [ ! -f "$in" ]; then
-            echo "E: Missing $in"
+            echo "E: Missing \"$in\""
             exit -1
     fi
     echo -e "\tdisassembling..."
@@ -633,7 +633,7 @@ function macho_functions() {
 	local _libarch=
 	local libarch=
 
-	if [ ! "$ARCH" = "arm" ]; then
+	if [ ! "$ARCH" = "armv7" ]; then
 		echo "E:"
 		echo "E: Architecture '$ARCH' is unsupported!"
 		echo "E:"
@@ -741,29 +741,33 @@ function strip_macho_library() {
 	local in="$1"
 	local out="$2"
 	local symtable="$3"
-	local _libarch=
 	local libarch=
+    #local tf_funclist="${CDIR}/.$$.$RANDOM.funclist.tmp"
+    local tf_indirectsyms="${CDIR}/.$$.$RANDOM.indirectsyms.tmp"
+    local tf_directsyms="${CDIR}/.$$.$RANDOM.directsyms.tmp"
+    local tf_dynsyms="${CDIR}/.$$.$RANDOM.dynsyms.tmp"
 
-	if [ ! "$ARCH" = "arm" ]; then
-		echo "E:"
+	if [ ! "$ARCH" = "armv7" ]; then
 		echo "E: Architecture '$ARCH' is unsupported!"
-		echo "E:"
-		exit 1
+		exit -1
 	fi
 
-	_libarch=$(${OTOOL} -h "$dylib" | grep architecture \
-			| tail -1 | sed 's,.*(architecture \(.*\)):.*,\1,')
-	if [ ! -z "$_libarch" ]; then
-		libarch="-arch $_libarch"
-	fi
+    libarch="-arch $ARCH"
 
-	# Get a list of functions
-	${OTOOL} $libarch -tV "$dylib" \
-			| grep '^[^0-9].*:$' \
-			| grep -v "$dylib" \
-			| $SED 's/:[ ]*$//' > "$tf_funclist"
+    # Get all dynamic exported symbols that are defined in __Text __text
+    nm  $libarch -s __TEXT __text "$in" \
+            | grep ".*\s[T]\s.*" \
+            | sed 's,^[0-9a-f]\{8\}[ ]T[ ],,g' > "$tf_dynsyms"
+
+    ${OTOOL} -I -V libsystem_c.dylib \
+            | sed 's,^0x[0-9a-f]\{8\}[ ]*.*[ ],,g' \
+            | grep "^_"  | sort -u > "$tf_indirectsyms"
+
+    ${COMM}  -13  "$tf_indirectsyms" "$tf_dynsyms" > "$tf_directsyms"
 
 	# TODO: write out 'symtable' with format 'SYM(ADDR,NAME)' (one-per-line)
+    # TODO: saved symbol
+
 
 	# Apple Strip options:
 	# -u        :  Save all undefined symbols
@@ -771,7 +775,14 @@ function strip_macho_library() {
 	# -i        :  Ignore symbols listed in {file} that are _not_ in ${in}
 	# -S        :  Remove debugging symbols
 	# -o {file} :  Write output library to {file}
-	${STRIP} -u -R "${tf_funclist}" -i -S -o "$out" - "$in"
+    echo -e "\tFound $(wc -l $tf_dynsyms) dynsyms."
+    echo -e "\tDirect symbols: $(wc -l $tf_directsyms)"
+    echo -e "\tIndirect symbols: $(wc -l $tf_indirectsyms)"
+    # TODO: fix warning
+    ${STRIP} $libarch -u -R "${tf_directsyms}" -i -S -o "$out" - "$in"
+    rm $tf_dynsyms
+    rm $tf_indirectsyms
+    rm $tf_directsyms
 }
 
 function strip_library() {
@@ -802,39 +813,49 @@ elif [ "$LIBTYPE" = "macho" ]; then
 	LIB_BASE="/usr/lib"
 fi
 
-tf_code="${CDIR}/.$$.$RANDOM.code.tmp"
-tf_syscalls="${CDIR}/.$$.$RANDOM.syscalls.tmp"
-
 if [ -z "${LIB}" -a -d "${LIBDIR}" ]; then
-	ALL_LIBS=
+	LIB_KERNEL="${LIBDIR}/libsystem_kernel.dylib"
+
+    # Extracting syscalls from libsystem_kernel
+    tf_code="${CDIR}/.$$.$RANDOM.code.tmp"
+    tf_syscalls="${CDIR}/.$$.$RANDOM.syscalls.tmp"
+    extract_code "$LIB_KERNEL" "$tf_code"
+    extract_syscalls "$tf_code" "$tf_syscalls"
+    rm $tf_code
+
 	if [ "$LIBTYPE" = "elf" ]; then
-		ALL_LIBS="$(find "${LIBDIR}" -type f -name *so)"
+		ALL_LIBS=`find "${LIBDIR}" -type f -name '*so'`
 	elif [ "$LIBTYPE" = "macho" ]; then
-		ALL_LIBS="$(find "${LIBDIR}" -type f -name *dylib)"
-	fi
-	echo "LIBS of type $LIBTYPE in '$LIBDIR': '$ALL_LIBS'"
-	for l in "$ALL_LIBS"; do
-		echo "Processing '$l'..."
-		extract_code "$l"
-		if [ $WRAPALL -eq 0 ]; then
-			extract_syscalls "$l"
-			extract_syscall_tree
-		fi
-		extract_functions "$l"
-		# use path relative to 'LIBDIR'
-		_l="${l#${LIBDIR}/}"
-		__l="_${_l:1}"
-		_l_symdir="${OUTDIR}/${_l}"
-		if [ ! -z "$USE_NDK" ]; then
-			_l_symdir="${OUTDIR}/${_l}/jni"
-		fi
-		_l_out="${_l_symdir}/$(basename ${_l})"
-		_l_real="${_l_symdir}/$(basename ${_l})"
-		strip_library "${l}" "${_l_real}" "${_l_symdir}/real_syms.h"
-		write_wrappers "${_l_out}" "${LIB_BASE}/${__l//./_}"
-	done
+        ALL_LIBS=`find "${LIBDIR}" -type f -name '*dylib'`
+    fi
+
+    for l in ${ALL_LIBS}; do
+        if [ "$l" = "$LIB_KERNEL" ]; then
+            continue
+        fi
+        echo -e "\tProcessing \"$l\""
+        _l="${l#${LIBDIR}/}"        #original name of source library
+        __l="_${_l:1}"              #fake name with same length
+        _l_symdir="${OUTDIR}/${_l}" #destination of the wrapped library
+        if [ ! -z "$USE_NDK" ]; then
+            _l_symdir="${OUTDIR}/${_l}/jni"
+        fi
+        _l_out="${_l_symdir}/$(basename ${_l})"           #wrapped library
+        _l_real="${_l_symdir}/${LIBPFX}$(basename ${_l})" #source library after HIDDING all symbols
+
+        tf_code="${CDIR}/.$$.$RANDOM.code.tmp"
+        extract_code "$l" "$tf_code"
+        extract_syscall_tree "$tf_code" "$tf_syscalls"
+        extract_functions "$l"
+        strip_library "$l" "${_l_real}" "${_l_symdir}/real_syms.h"
+        write_wrappers "${_l_out}" "${LIB_BASE}/${__l//./_}"
+        rm -f "$tf_code"
+    done
+    rm -f "$tf_syscalls"
 else
-	echo "Processing '$LIB'..."
+    tf_code="${CDIR}/.$$.$RANDOM.code.tmp"
+    tf_syscalls="${CDIR}/.$$.$RANDOM.syscalls.tmp"
+    echo "Processing '$LIB'..."
 	_l=$(basename ${LIB})
 	__l="_${_l:1}"
 	_l_symdir="${OUTDIR}/${LIB}"
@@ -851,7 +872,6 @@ else
 	extract_functions "$LIB"
 	strip_library "$LIB" "${_l_real}" "${_l_symdir}/real_syms.h"
 	write_wrappers "${_l_out}" "${LIB_BASE}/${__l//./_}"
+    rm -f "$tf_code"
+    rm -f "$tf_syscalls"
 fi
-
-rm -f "$tf_code"
-rm -f "$tf_syscalls"
