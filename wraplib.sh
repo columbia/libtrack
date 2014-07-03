@@ -553,41 +553,88 @@ function write_wrappers() {
 	local fcn=
 	local num=
 	LIBPATH=${_libpath}
-	if [ "$LIBTYPE" = "elf" ]; then
-		libname=${_libname%.so}.S
-	else
-		libname=${_libname%.dylib}.S
-	fi
-
 	LIB="$(basename $1)"
-	echo -e "\tcreating library project in '${dir}'..."
-	__setup_wrapped_lib "${dir}" "${libname}"
 
-	echo -e -n "\twriting ${#SYSCALLS[@]} syscall wrappers"
-	__line_len=40
-	for sc in "${SYSCALLS[@]}"; do
-		fcn=${sc#*:}
-		#num=${sc%:*}
-		write_sym "WRAP" "${LIB}" "${fcn}" "${libname}"
-	done
-	echo ""
+    # MachO
+    if [ "$LIBTYPE" = "macho" ]; then
+        libname=${_libname%.dylib}.S
+                echo -e "\tcreating library project in '${dir}'..."
+        __setup_wrapped_lib "${dir}" "${libname}"
+        __line_len=40
+        echo -e -n "\twriting syscall wrappers"
+        for sc in "${SYSCALLS[@]}"; do
+            fcn=${sc#*:}
+            # Skip writting wrappers for indirect symbols
+            should_wrap_${ARCH}_${LIBTYPE} "$fcn"
+            if [ $__SHOULD_WRAP -eq 1 ]; then
+                write_sym "WRAP" "${LIB}" "${fcn}" "${libname}"
+                x=$((x+1))
+            fi
+        done
+        echo ""
+        echo -e "\twrote $x syscall wrappers"
+        echo "" >> "${libname}"
 
-	echo "" >> "${libname}"
+        __line_len=40
+        x=0
+        if [ $WRAPALL -eq 1 ]; then
+            echo -e -n "\twriting syscall wrappers"
+            for e in "${FUNCTIONS[@]}"; do
+                # Skip writting wrappers for indirect symbols
+                should_wrap_${ARCH}_${LIBTYPE} "$e"
+                if [ $__SHOULD_WRAP -eq 1 ]; then
+                    write_sym "WRAP" "${LIB}" "${e}" "${libname}"
+                    x=$((x+1))
+                fi
+            done
+            echo ""
+            echo -e "\twrote $x syscall wrappers"
+        else
+            echo -e -n "\twriting function wrappers"
+            for e in "${FUNCTIONS[@]}"; do
+                # Skip writting wrappers for indirect symbols
+                should_wrap_${ARCH}_${LIBTYPE} "$e"
+                if [ $__SHOULD_WRAP -eq 1 ]; then
+                    write_sym "PASS" "${LIB}" "${e}" "${libname}"
+                    x=$((x+1))
+                fi
+            done
+            echo ""
+            echo -e "\twrote $x function wrappers"
+        fi
+        echo ""
+        rm $tf_directsyms
+    # ELF
+    else
+        libname=${_libname%.so}.S
+        echo -e "\tcreating library project in '${dir}'..."
+        __setup_wrapped_lib "${dir}" "${libname}"
 
-	echo -e -n "\twriting ${#FUNCTIONS[@]} function wrappers"
-	__line_len=40
-	if [ $WRAPALL -eq 1 ]; then
-		for e in "${FUNCTIONS[@]}"; do
-			write_sym "WRAP" "${LIB}" "${e}" "${libname}"
-		done
-	else
-		for e in "${FUNCTIONS[@]}"; do
-			write_sym "PASS" "${LIB}" "${e}" "${libname}"
-		done
-	fi
-	echo ""
+        echo -e -n "\twriting ${#SYSCALLS[@]} syscall wrappers"
+        __line_len=40
+        for sc in "${SYSCALLS[@]}"; do
+            fcn=${sc#*:}
+            #num=${sc%:*}
+            write_sym "WRAP" "${LIB}" "${fcn}" "${libname}"
+        done
+        echo ""
+        echo "" >> "${libname}"
 
-	echo "${FILE_FOOTER}" >> "${libname}"
+        echo -e -n "\twriting ${#FUNCTIONS[@]} function wrappers"
+        __line_len=40
+        if [ $WRAPALL -eq 1 ]; then
+            for e in "${FUNCTIONS[@]}"; do
+                # checkhere if should be writen
+                write_sym "WRAP" "${LIB}" "${e}" "${libname}"
+            done
+        else
+            for e in "${FUNCTIONS[@]}"; do
+                write_sym "PASS" "${LIB}" "${e}" "${libname}"
+            done
+        fi
+        echo ""
+    fi
+    echo "${FILE_FOOTER}" >> "${libname}"
 }
 
 __FOUND_SYSCALL=0
@@ -604,11 +651,15 @@ function is_syscall() {
 	done
 }
 
-__SHOULD_WRAP=0
 function should_wrap_armv7_macho() {
-	local fcn="$1"
-	__SHOULD_WRAP=1
-	return
+	local sym="$1"
+
+    __SHOULD_WRAP=0
+    grep -wq "$sym" "$tf_directsyms"
+    if [ "$?" -eq 0 ]; then
+        __SHOULD_WRAP=1
+    fi
+    return
 }
 
 function should_wrap_arm_elf() {
@@ -636,7 +687,6 @@ function should_wrap_arm_elf() {
 function macho_functions() {
 	local dylib="$1"
 	local entries=
-	local _libarch=
 	local libarch=
 
 	if [ ! "$ARCH" = "armv7" ]; then
@@ -646,21 +696,23 @@ function macho_functions() {
 		exit 1
 	fi
 
-	_libarch=$(${OTOOL} -h "$dylib" | grep architecture \
+	libarch=$(${OTOOL} -h "$dylib" | grep architecture \
 			| tail -1 | sed 's,.*(architecture \(.*\)):.*,\1,')
-	if [ ! -z "$_libarch" ]; then
-		libarch="-arch $_libarch"
+    if [ ! -z "$libarch" ]; then
+		libarch="-arch $libarch"
 	fi
-	entries=( $(${OTOOL} $libarch -tV "$dylib" | grep '^[^[]*:\s*$' \
-				| grep -v "$dylib" | $SED 's/:[ ]*//g') )
-	FUNCTIONS=( )
-	for idx in $(seq 0 $((${#entries[@]}-1))); do
+
+    entries=( $(${OTOOL} $libarch -tV "$dylib" | grep '^[^[]*:\s*$' \
+        | grep -v "$dylib" | $SED 's/:[ ]*//g') )
+
+    FUNCTIONS=( )
+    for idx in $(seq 0 $((${#entries[@]}-1))); do
 		is_syscall "${entries[$idx]}"
-		should_wrap_${ARCH}_${LIBTYPE} "$fcn"
-		if [ $__FOUND_SYSCALL -eq 0 -a $__SHOULD_WRAP -eq 1 ]; then
-			FUNCTIONS+=( "${entries[$idx]}" )
-		fi
-	done
+        #if [ $__FOUND_SYSCALL -eq 0 -a $__SHOULD_WRAP -eq 1 ]; then
+        if [ "$__FOUND_SYSCALL" -eq "0" ]; then
+            FUNCTIONS+=( "${entries[$idx]}" )
+        fi
+    done
 	echo -e "\t    (found ${#entries[@]} Mach-O entry points, ${#FUNCTIONS[@]} non-syscall)"
     #TODO:
     #Duplicate MachO symbols?
@@ -748,9 +800,8 @@ function strip_macho_library() {
 	local out="$2"
 	local symtable="$3"
 	local libarch=
-    #local tf_funclist="${CDIR}/.$$.$RANDOM.funclist.tmp"
     local tf_indirectsyms="${CDIR}/.$$.$RANDOM.indirectsyms.tmp"
-    local tf_directsyms="${CDIR}/.$$.$RANDOM.directsyms.tmp"
+    tf_directsyms="${CDIR}/.$$.$RANDOM.directsyms.tmp"
     local tf_dynsyms="${CDIR}/.$$.$RANDOM.dynsyms.tmp"
 
 	if [ ! "$ARCH" = "armv7" ]; then
@@ -804,9 +855,6 @@ function strip_macho_library() {
 
     rm $tf_dynsyms
     rm $tf_indirectsyms
-    rm $tf_directsyms
-
-    # TODO: _should_wrap only for direct symbols... Ignore indirect.
 }
 
 function strip_library() {
