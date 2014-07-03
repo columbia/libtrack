@@ -22,6 +22,7 @@ COMM=`which comm`
 SED=`which gsed`
 ELF_OBJDUMP=`which ${TOOL_PFX}objdump`
 ELF_READELF=`which ${TOOL_PFX}readelf`
+NM=`which nm`
 
 if [ -z "$SED" ]; then
 	# hope for the best...
@@ -173,6 +174,11 @@ if [ "$LIBTYPE" = "macho" ]; then
 		echo "E: Can't find comm in your path."
 		exit -1
 	fi
+    if [ -z "$NM" -o ! -x "$NM" ]; then
+		echo "E: Can't find nm in your path."
+		exit -1
+	fi
+
 elif [ "$LIBTYPE" = "elf" ]; then
 	STRIP="${CDIR}/elfmod/elfmod.py"
 	if [ -z "$ELF_OBJDUMP" -o ! -x "$ELF_OBJDUMP" ]; then
@@ -755,19 +761,33 @@ function strip_macho_library() {
     libarch="-arch $ARCH"
 
     # Get all dynamic exported symbols that are defined in __Text __text
-    nm  $libarch -s __TEXT __text "$in" \
+    ${NM}  $libarch -s __TEXT __text "$in" \
             | grep ".*\s[T]\s.*" \
-            | sed 's,^[0-9a-f]\{8\}[ ]T[ ],,g' > "$tf_dynsyms"
+            | ${SED} 's,^[0-9a-f]\{8\}[ ]T[ ],,g' \
+            | sort -u > "$tf_dynsyms"
 
-    ${OTOOL} -I -V libsystem_c.dylib \
-            | sed 's,^0x[0-9a-f]\{8\}[ ]*.*[ ],,g' \
-            | grep "^_"  | sort -u > "$tf_indirectsyms"
+    # Get all indirectly referenced symbols
+    ${OTOOL} $libarch -I -V "$in" \
+            | ${SED} 's,^0x[0-9a-f]\{8\}[ ]*.*[ ],,g' \
+            | grep "^_"  \
+            | sort -u > "$tf_indirectsyms"
 
+    # Get all directly referrenced symbols
     ${COMM}  -13  "$tf_indirectsyms" "$tf_dynsyms" > "$tf_directsyms"
 
-	# TODO: write out 'symtable' with format 'SYM(ADDR,NAME)' (one-per-line)
-    # TODO: saved symbol
+    # TODO: save the real size of text section, if need be
+    echo "TEXT_SIZE(0x000000)" > "${symtable}"
 
+    # Extract a non-function symbol and remember its name and address.
+    # This will be used to find the address where the binary will be loaded.
+    ${NM} $libarch -s __TEXT __text "$in" \
+        | grep ".*\s[T]\s.*" \
+        | awk '{print "SAVED(0x"$1","$3")"}' | head -n 1 >> "${symtable}"
+
+    # Write out 'symtable' with format 'SYM(ADDR,NAME)' for all symbols.
+    ${NM} $libarch -s __TEXT __text "$in" \
+        | grep ".*\s[T]\s.*" \
+        | awk '{print "SYM("0x$1","$3")"}'  >> "${symtable}"
 
 	# Apple Strip options:
 	# -u        :  Save all undefined symbols
@@ -778,11 +798,15 @@ function strip_macho_library() {
     echo -e "\tFound $(wc -l $tf_dynsyms) dynsyms."
     echo -e "\tDirect symbols: $(wc -l $tf_directsyms)"
     echo -e "\tIndirect symbols: $(wc -l $tf_indirectsyms)"
-    # TODO: fix warning
+
+    #  strip (hide) direct MachO symbols
     ${STRIP} $libarch -u -R "${tf_directsyms}" -i -S -o "$out" - "$in"
+
     rm $tf_dynsyms
     rm $tf_indirectsyms
     rm $tf_directsyms
+
+    # TODO: _should_wrap only for direct symbols... Ignore indirect.
 }
 
 function strip_library() {
@@ -869,7 +893,7 @@ else
 		extract_syscalls "$LIB" "$tf_syscalls"
 		extract_syscall_tree "$tf_code" "$tf_syscalls"
 	fi
-	extract_functions "$LIB"
+    extract_functions "$LIB"
 	strip_library "$LIB" "${_l_real}" "${_l_symdir}/real_syms.h"
 	write_wrappers "${_l_out}" "${LIB_BASE}/${__l//./_}"
     rm -f "$tf_code"
