@@ -43,6 +43,7 @@ LIBTYPE=
 LIBPATH=
 OUTDIR=.
 USE_NDK=
+SYMFILE=
 
 LIBPFX=real_
 
@@ -55,6 +56,7 @@ function usage() {
 	echo -e "                          [--use-ndk]"
 	echo -e ""
 	echo -e "\t--wrap-all                      Wrap (trace) all functions in the library"
+	echo -e "\t--wrap-specific symfile          Wrap symbols specified in symfile"
 	echo -e "\t--wrap-prio [1|2]               1 = \"always wrap\" functions take priority"
 	echo -e "\t                                2 = \"never wrap\" functions take priority"
 	echo -e "\t                                (default: 2)"
@@ -95,7 +97,16 @@ while [[ ! -z "$1" ]]; do
 			fi
 			shift
 			;;
-		--arch )
+		--wrap-specific )
+            if [ ! -f "$2" ]; then
+                echo "E: Missing symfile"
+                usage
+            fi
+			SYMFILE="$2"
+			shift
+			shift
+			;;
+        --arch )
 			if [ "$2" != "arm"  -a "$2" != "armv7" ]; then
 				echo "E: Architectures other than 'arm' and 'arv7' are not yet supported!"
 				usage
@@ -317,6 +328,15 @@ function write_sym() {
 	local _dst="$4"
 	local _dup=0
 	declare -a syms=( )
+
+    if [ ! -z "$SYMFILE" ]; then
+        grep -wq "$_fcn" "$SYMFILE"
+        if [ "$?" -eq 0 ]; then
+            _type="WRAP"
+        else
+            _type="PASS"
+        fi
+    fi
 
 	for ii in $DUP_SYMS_SEQ; do
 		syms=( ${DUP_SYMS[$ii]} )
@@ -666,7 +686,7 @@ function should_wrap_arm_elf() {
 	local fcn="$1"
 	local plt_RE='.*[.@]plt$';
 
-	__SHOULD_WRAP=1
+    __SHOULD_WRAP=1
 	if [[ $fcn =~ $plt_RE ]]; then
 		__SHOULD_WRAP=0
 		return
@@ -883,6 +903,13 @@ if [ "$LIBTYPE" = "elf" ]; then
 	fi
 elif [ "$LIBTYPE" = "macho" ]; then
 	LIB_BASE="/usr/lib"
+fi
+
+if [ ! -z "$SYMFILE" ]; then
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo "Neglect all messages..."
+    echo "I will only WRAP symbols specified in file \"$SYMFILE\""
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
 fi
 
 if [ -z "${LIB}" -a -d "${LIBDIR}" ]; then
