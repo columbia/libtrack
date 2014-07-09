@@ -938,7 +938,7 @@ else
 	_l_real="${_l_symdir}/${LIBPFX}${_l}"
 	extract_code "$LIB" "$tf_code"
 	if [ $WRAPALL -eq 0 ]; then
-		extract_syscalls "$LIB" "$tf_syscalls"
+		extract_syscalls "$tf_code" "$tf_syscalls"
 		extract_syscall_tree "$tf_code" "$tf_syscalls"
 	fi
     extract_functions "$LIB"
