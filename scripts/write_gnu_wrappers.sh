@@ -53,8 +53,9 @@ function echo_header()
 #include <wordexp.h>
 #include <assert.h>
 #include <stdarg.h>
+#include <zlib.h>
 
-#define MAX_FRAMES 2
+#define MAX_FRAMES 20
 #define NAME_LEN 512
 #define LINE_LEN 512
 
@@ -64,59 +65,56 @@ extern char *__progname;"
 function echo_backtrace_function()
 {
     echo "
-/*
- * Any libc function used in this routine should 
- * be dynamically loaded to avoid recursice loops
- *
- */
 static void _backtrace()
 {
-    	void  *frames[MAX_FRAMES];
-    	char **bt;
-    	size_t i, nframes;
-    	FILE *fp;
-    	char name[NAME_LEN];
-    	char *lib;
-    	char *libbase;
-    	char *sym;
-    	char *symoff;
-    	char *delim = \"()+[] \";
-    	char line[LINE_LEN];
-    	nframes = backtrace(frames, MAX_FRAMES);
-    	bt = backtrace_symbols(frames, nframes);
+        void  *frames[MAX_FRAMES];
+        char **bt;
+        size_t i, j, nframes;
+        FILE *fp;
+        char name[NAME_LEN];
+        char *lib;
+        char *sym;
+        char line[LINE_LEN];
 
-        char * (*pstrcpy)(char *dest, const char *src) =  dlsym(RTLD_NEXT, \"strcpy\");
-        char * (*pstrtok)(char *str, const char *delim) = dlsym(RTLD_NEXT, \"strtok\");
-        int (*pfprintf)(FILE *stream, const char *format, ...) = dlsym(RTLD_NEXT, \"fprintf\");
-//        int (*psprintf)(char *str, const char *format, ...) = dlsym(RTLD_NEXT, \"sprintf\");
-        void (*pfree)(void *ptr) = dlsym(RTLD_NEXT, \"free\");
-//        FILE * (*pfopen)(const char *path, const char *mode) = dlsym(RTLD_NEXT, \"fopen\");
-//        int (*pfclose)(FILE *fp) = dlsym(RTLD_NEXT, \"fclose\");
+        FILE * (*pfopen)(const char *path, const char *mode) = dlsym(RTLD_NEXT, \"fopen\");
+        int (*pfclose)(FILE *fp) = dlsym(RTLD_NEXT, \"fclose\");
+        pid_t (*pgetpid)(void) = dlsym(RTLD_NEXT, \"getpid\");
 
-        for (i = 0; i < nframes; i++)
-    	{
-    		pstrcpy(line, bt[i]);
-    		lib = pstrtok(line, delim);
-    		sym = pstrtok(NULL, delim);
-    		if ( sym[0] == '0'  && sym[1] == 'x' ){
-    			symoff = sym;
-    			sym = \"??\";
-    		}
-    		else
-    			symoff = pstrtok(NULL, delim);
-    		libbase = pstrtok(NULL, delim);
-    		/* Format:
-    		 *
-    		 * TIMESTAMP::STACKFRAMENO:SYM:SYMNAME:SYM_OFFSET:DLINAME:DLIBASE
-    		 *
-    		 */
-//    		pfprintf(stderr, \"TIMESTAMP::%d:SYM:%s:%s:%s:%s\n\", i, sym, symoff, lib, libbase);
-    	}
-    	pfree(bt);
-    //	psprintf(name, \"%s.%ld.%ld.log\", __progname, getpid(),syscall(SYS_gettid));
-    //	fp = pfopen(name, \"a+\");
-    //	pfprintf(stderr, \"Interpossed:%s opening:%s\n\", __progname, pathname);
-    //	pfclose(fp);
+
+        nframes = backtrace(frames, MAX_FRAMES);
+        bt = backtrace_symbols(frames, nframes);
+
+        sprintf(name, \"%s.%ld.%ld.log\", __progname, pgetpid(),syscall(SYS_gettid));
+        fp = pfopen(name, \"a+\");
+
+        for (i = 1; i < nframes; i++){
+            strncpy(line, bt[i],LINE_LEN);
+            for (j = 0;  j < LINE_LEN; j++)
+                if ( line[j] == '(' ){
+                    line[j] = '\0';
+                    break;
+                }
+            lib = line;
+            if ( i > 1 ){
+                /* Format:  TIMESTAMP::STACKFRAMENO:SYMVAL:SYMNAME:SYMOFFSET:DLINAME:DLIBASE */
+                fprintf(fp, \"TIMESTAMP::%d:SYMVAL:SYM:SYMOFFSET:%s:DLIBASE\n\", i, lib);
+                continue;
+            }
+
+            sym = line + j + 1;
+            if ( *sym == '+' )
+                fprintf(fp, \"TIMESTAMP::%d:SYMVAL:??:SYMOFFSET:%s:DLIBASE\n\", i, lib);
+            else{
+                for ( ; j < LINE_LEN ; j++ )
+                    if ( line[j] == '+' ){
+                        line[j] = '\0';
+                        break;
+                    }
+                fprintf(fp, \"TIMESTAMP::%d:SYMVAL:%s:SYMOFFSET:%s:DLIBASE\n\", i, sym, lib);
+            }
+        }
+        free(bt);
+        pfclose(fp);
 }"
 echo ""
 }
@@ -235,10 +233,17 @@ fi
 IFILE="$1"
 echo_header
 echo_backtrace_function
+count=0
 while read line; do
+    if [ "${line:0:1}" = "#" ]; then
+        continue
+    fi
     fargs=`echo "$line" | sed 's,.*(,,g' | sed 's,[);],,g'`
     fname=`echo "$line" | sed 's,(.*,,g' | tr ' ' '\n' | tail -n 1 | sed 's,\*,,g'`
     ftype=`echo "$line" | sed 's,[a-z0-9_]\+(.*,,g'`
     echo_wrapper "$ftype" "$fname" "$fargs"
+    count=$(($count+1))
 done < "$IFILE"
 echo_special_wrappers
+
+echo "Intrerpossing $(($count+9)) wrappers..." 1>&2
