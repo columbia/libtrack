@@ -234,9 +234,9 @@ _static void print_info(struct tls_info *tls, int count, void *sym)
 		 * the dladdr results
 		 */
 		if (count > 0)
-			__bt_printf(tls, " :%d:%s", count, cline->str);
+			__bt_printf(tls, ":%d:%s", count, cline->str);
 		else
-			__bt_printf(tls, " :0:%x:%s:%s",
+			__bt_printf(tls, ":0:%x:%s:%s",
 				    (unsigned int)sym, info->symbol, cline->str);
 		return;
 	}
@@ -272,7 +272,7 @@ do_lookup:
 				      "%x:%s:%c0x%x:%s(%p):",
 				      (unsigned int)sym, symname,
 				      c, ofst, dli.dli_fname, dli.dli_fbase);
-			__bt_printf(tls, " :%d:%s", count, cline->str);
+			__bt_printf(tls, ":%d:%s", count, cline->str);
 		} else {
 			/* only cache the dladdr() lookup results
 			 * for the last symbol in the BT stack - this allows
@@ -281,13 +281,13 @@ do_lookup:
 			libc.snprintf(cline->str, MAX_LINE_LEN,
 				      "%c0x%x:%s(%p):",
 				      c, ofst, dli.dli_fname, dli.dli_fbase);
-			__bt_printf(tls, " :0:%x:%s:%s",
+			__bt_printf(tls, ":0:%x:%s:%s",
 				    (unsigned int)sym, symname, cline->str);
 		}
 		return;
 	}
 
-	__bt_printf(tls, " :%d:0x%x:%s:%c0x%x:%s(%p):",
+	__bt_printf(tls, ":%d:0x%x:%s:%c0x%x:%s(%p):",
 		    count, (unsigned int)sym, symname,
 		    c, ofst, dli.dli_fname, dli.dli_fbase);
 }

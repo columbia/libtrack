@@ -389,7 +389,7 @@ _static void print_dvm_sym(struct tls_info *tls, struct dvm_iface *dvm,
 		goto do_lookup;
 
 	if (cline->sym == (void *)m) {
-		__bt_printf(tls, " :%d:%s", count, cline->str);
+		__bt_printf(tls, ":%d:%s", count, cline->str);
 		return;
 	}
 
@@ -400,11 +400,11 @@ do_lookup:
 	name = dvm->dvmHumanReadableMethod(m, DVM_BT_GET_SIGNATURE);
 	if (cline) {
 		libc.snprintf(cline->str, MAX_LINE_LEN, "%s:", name.c_str());
-		__bt_printf(tls, " :%d:%s", count, cline->str);
+		__bt_printf(tls, ":%d:%s", count, cline->str);
 		return;
 	}
 
-	__bt_printf(tls, " :%d:%s:", count, name.c_str());
+	__bt_printf(tls, ":%d:%s:", count, name.c_str());
 }
 
 extern "C"
