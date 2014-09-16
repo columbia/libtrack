@@ -55,6 +55,8 @@ function echo_header()
 
 extern char *__progname;
 volatile int*  __errno(void);
+
+__thread unsigned int entered = 0;
 "
 }
 
@@ -141,7 +143,7 @@ _backtrace ()
                     libc_fprintf(fp, \" T::%d:SVAL:%s:OFFSET:%s:(DLIBASE)\n\", i, sym, \"libc.so\");
             }
         }
-//        libc_free(bt);
+        //libc_free(bt);
         libc_fclose(fp);
 }"
 echo ""
@@ -589,6 +591,7 @@ function echo_wrapper()
     echo "$ftype"
     echo "$fname ($farg_prototypes)"
     echo "{"
+    echo "       __sync_fetch_and_add(&entered, 1);"
     echo "       struct timespec start, end;"
     echo "       static $ftype (*fn)($farg_signatures);"
     echo "       _backtrace();"
@@ -604,6 +607,7 @@ function echo_wrapper()
         echo "       clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);"
         echo "       _timespec_sub(&end, &start);"
         echo "       _logtime(\"$fname\", end);"
+        echo "       __sync_fetch_and_sub(&entered, 1);"
     elif [ "$farg_names" = "void"  -a "$ftype" != "void " ]; then
         echo "       $ftype rval;"
         echo "       clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);"
@@ -611,6 +615,7 @@ function echo_wrapper()
         echo "       clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);"
         echo "       _timespec_sub(&end, &start);"
         echo "       _logtime(\"$fname\", end);"
+        echo "       __sync_fetch_and_sub(&entered, 1);"
         echo  "      return rval;"
     elif [ "$farg_names" != "void"  -a  "$ftype" = "void " ]; then
         echo "       clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);"
@@ -618,6 +623,7 @@ function echo_wrapper()
         echo "       _timespec_sub(&end, &start);"
         echo "       _logtime(\"$fname\", end);"
         echo "       clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);"
+        echo "       __sync_fetch_and_sub(&entered, 1);"
     else
         echo "       $ftype rval;"
         echo "       clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);"
@@ -625,6 +631,7 @@ function echo_wrapper()
         echo "       clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);"
         echo "       _timespec_sub(&end, &start);"
         echo "       _logtime(\"$fname\", end);"
+        echo "       __sync_fetch_and_sub(&entered, 1);"
         echo "       return rval;"
     fi
     echo "}"
