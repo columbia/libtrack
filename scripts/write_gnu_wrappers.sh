@@ -217,60 +217,72 @@ function echo_special_wrappers()
 int
 pthread_create (pthread_t *thread, const pthread_attr_t *attr, void *(*start_routine) (void *), void *arg)
 {
+        int rval;
         struct timespec start, end;
         int (*fn)(pthread_t *, const pthread_attr_t *, void *(*start_routine) (void *), void *arg());
+
+        __sync_fetch_and_add(&entered, 1);
         _backtrace();
         *(void **)(&fn) = dlsym(RTLD_NEXT, \"pthread_create\");
-        if (fn == NULL){
+        if (fn == NULL) {
             fprintf(stderr, \"dlsym: Error while loading symbol: <%s>\n\", \"pthread_create\");
-            return;
+            goto out;
         }
-        int rval;
         clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
         rval = fn(thread, attr, start_routine, arg);
         clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
         _timespec_sub(&end, &start);
         _logtime(\"pthread_create\", end);
+out:
+        __sync_fetch_and_sub(&entered, 1);
         return rval;
 }
 
 int
 glob (const char *pattern, int flags, int (*errfunc) (const char *epath, int eerrno), glob_t *pglob)
 {
+        int rval;
         struct timespec start, end;
         int (*fn)(const char *, int flags, int (*errfunc) (const char *, int), glob_t *);
+
+        __sync_fetch_and_add(&entered, 1);
         _backtrace();
         fn = dlsym(RTLD_NEXT, \"glob\");
         if (fn == NULL){
             fprintf(stderr, \"dlsym: Error while loading symbol: <%s>\n\", \"glob\");
-            return;
+            goto out;
         }
-        int rval;
         clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
         rval =  fn(pattern, flags, errfunc, pglob);
         clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
         _timespec_sub(&end, &start);
         _logtime(\"glob\", end);
+out:
+        __sync_fetch_and_sub(&entered, 1);
         return rval;
 }
 
 void *
 tdelete (const void *key, void **rootp, int (*compar)(const void *, const void *))
 {
+        void  *rval;
         struct timespec start, end;
         void * (*fn)(const void *, void **, int (*compar)(const void *, const void *));
+
+        __sync_fetch_and_add(&entered, 1);
         _backtrace();
         fn = dlsym(RTLD_NEXT, \"tdelete\");
         if (fn == NULL){
             fprintf(stderr, \"dlsym: Error while loading symbol: <%s>\n\", \"tdelete\");
-            return;
+            goto out;
         }
-        void  *rval;
         clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
         rval =  fn(key, rootp, compar);
         clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
         _timespec_sub(&end, &start);
         _logtime(\"tdelete\", end);
+out:
+        __sync_fetch_and_sub(&entered, 1);
         return rval;
 }
 
@@ -279,16 +291,20 @@ qsort_r (void *base, size_t nmemb, size_t size, int (*compar)(const void *, cons
 {
         struct timespec start, end;
         void (*fn)(void *base, size_t, size_t, int (*compar)(const void *, const void *, void *), void *arg);
+
+        __sync_fetch_and_add(&entered, 1);
         _backtrace();
         fn = dlsym(RTLD_NEXT, \"qsort_r\");
         if (fn == NULL){
             fprintf(stderr, \"dlsym: Error while loading symbol: <%s>\n\", \"qsort_r\");
-            return;
+            goto out;
         }
         clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
         fn(base, nmemb, size, compar, arg);
         clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
         _timespec_sub(&end, &start);
+out:
+        __sync_fetch_and_sub(&entered, 1);
         _logtime(\"qsort_r\", end);
 }
 
