@@ -338,28 +338,98 @@ _logtime (char *funcname, struct timespec end)
 function echo_special_wrappers()
 {
     echo "
+
+ssize_t
+read (int fd, void *buf, size_t count)
+{
+        struct timespec start, end;
+        static ssize_t  (*fn)(int , void *, size_t );
+        __sync_fetch_and_add(&entered, 1);
+        if (fn == NULL)
+                *(void **)(&fn) = dlsym(RTLD_NEXT, \"read\");
+        if (fn == NULL){
+                fprintf(stderr, \"dlsym: Error while loading symbol: <%s>\n\", \"read\");
+                goto out;
+        }
+        ssize_t  rval;
+        if (entered == 1) {
+                char name[] = \"read_?\";
+                name[5] = fd_type(fd);
+                _backtrace_given_name(name);
+                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+                rval = fn(fd, buf, count);
+                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+                _timespec_sub(&end, &start);
+                _logtime(name, end);
+        } else {
+                rval = fn(fd, buf, count);
+        }
+out:
+        __sync_fetch_and_sub(&entered, 1);
+        return rval;
+}
+
+
+
+ssize_t
+write (int fd, const void *buf, size_t count)
+{
+        struct timespec start, end;
+        static ssize_t  (*fn)(int , const void *, size_t );
+        __sync_fetch_and_add(&entered, 1);
+        if (fn == NULL)
+               *(void **)(&fn) = dlsym(RTLD_NEXT, \"write\");
+        if (fn == NULL){
+                fprintf(stderr, \"dlsym: Error while loading symbol: <%s>\n\", \"write\");
+                goto out;
+        }
+        ssize_t  rval;
+        if (entered == 1) {
+                char name[] = \"write_?\";
+                name[6] = fd_type(fd);
+                _backtrace_given_name(name);
+                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+                rval = fn(fd, buf, count);
+                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+                _timespec_sub(&end, &start);
+               _logtime(name, end);
+       } else {
+               rval = fn(fd, buf, count);
+       }
+out:
+       __sync_fetch_and_sub(&entered, 1);
+       return rval;
+}
+
+
+
 int
 pthread_create (pthread_t *thread, const pthread_attr_t *attr,
                 void *(*start_routine) (void *), void *arg)
 {
         int rval;
         struct timespec start, end;
-        int (*fn)(pthread_t *, const pthread_attr_t *,
+        static  int (*fn)(pthread_t *, const pthread_attr_t *,
                   void *(*start_routine) (void *), void *arg());
 
         __sync_fetch_and_add(&entered, 1);
-        _backtrace();
-        *(void **)(&fn) = dlsym(RTLD_NEXT, \"pthread_create\");
+        if (fn == NULL)
+            *(void **)(&fn) = dlsym(RTLD_NEXT, \"pthread_create\");
         if (fn == NULL) {
             fprintf(stderr, \"dlsym: Error while loading symbol: <%s>\n\",
                     \"pthread_create\");
             goto out;
         }
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-        rval = fn(thread, attr, start_routine, arg);
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-        _timespec_sub(&end, &start);
-        _logtime(\"pthread_create\", end);
+        if (entered == 1) {
+            _backtrace();
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+            rval = fn(thread, attr, start_routine, arg);
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+            _timespec_sub(&end, &start);
+            _logtime(\"pthread_create\", end);
+        } else {
+            rval = fn(thread, attr, start_routine, arg);
+        }
 out:
         __sync_fetch_and_sub(&entered, 1);
         return rval;
