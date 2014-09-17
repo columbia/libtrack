@@ -441,21 +441,27 @@ glob (const char *pattern, int flags,
 {
         int rval;
         struct timespec start, end;
-        int (*fn)(const char *, int flags,
+        static int (*fn)(const char *, int flags,
                   int (*errfunc) (const char *, int), glob_t *);
 
         __sync_fetch_and_add(&entered, 1);
-        _backtrace();
-        fn = dlsym(RTLD_NEXT, \"glob\");
+        if (fn == NULL)
+            *(void**)(&fn) = dlsym(RTLD_NEXT, \"glob\");
         if (fn == NULL){
             fprintf(stderr, \"dlsym: Error while loading symbol: <%s>\n\", \"glob\");
             goto out;
         }
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-        rval =  fn(pattern, flags, errfunc, pglob);
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-        _timespec_sub(&end, &start);
-        _logtime(\"glob\", end);
+        if (entered == 1) {
+            _backtrace();
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+            rval =  fn(pattern, flags, errfunc, pglob);
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+            _timespec_sub(&end, &start);
+            _logtime(\"glob\", end);
+        } else {
+            rval =  fn(pattern, flags, errfunc, pglob);
+        }
+
 out:
         __sync_fetch_and_sub(&entered, 1);
         return rval;
@@ -467,21 +473,27 @@ tdelete (const void *key, void **rootp,
 {
         void  *rval;
         struct timespec start, end;
-        void * (*fn)(const void *, void **,
+        static void * (*fn)(const void *, void **,
                      int (*compar)(const void *, const void *));
 
         __sync_fetch_and_add(&entered, 1);
-        _backtrace();
-        fn = dlsym(RTLD_NEXT, \"tdelete\");
+        if (fn == NULL)
+            *(void**)(&fn) = dlsym(RTLD_NEXT, \"tdelete\");
         if (fn == NULL){
             fprintf(stderr, \"dlsym: Error while loading symbol: <%s>\n\", \"tdelete\");
             goto out;
         }
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-        rval =  fn(key, rootp, compar);
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-        _timespec_sub(&end, &start);
-        _logtime(\"tdelete\", end);
+        if (entered == 1) {
+            _backtrace();
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+            rval =  fn(key, rootp, compar);
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+            _timespec_sub(&end, &start);
+            _logtime(\"tdelete\", end);
+        } else {
+            rval =  fn(key, rootp, compar);
+        }
+
 out:
         __sync_fetch_and_sub(&entered, 1);
         return rval;
@@ -492,21 +504,26 @@ qsort_r (void *base, size_t nmemb, size_t size,
          int (*compar)(const void *, const void *, void *), void *arg)
 {
         struct timespec start, end;
-        void (*fn)(void *base, size_t, size_t,
+        static void (*fn)(void *base, size_t, size_t,
                    int (*compar)(const void *, const void *, void *), void *arg);
 
         __sync_fetch_and_add(&entered, 1);
-        _backtrace();
-        fn = dlsym(RTLD_NEXT, \"qsort_r\");
+        if (fn == NULL)
+            *(void**)(&fn) = dlsym(RTLD_NEXT, \"qsort_r\");
         if (fn == NULL){
             fprintf(stderr, \"dlsym: Error while loading symbol: <%s>\n\",
                     \"qsort_r\");
             goto out;
         }
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-        fn(base, nmemb, size, compar, arg);
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-        _timespec_sub(&end, &start);
+        if (entered == 1) {
+            _backtrace();
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+            fn(base, nmemb, size, compar, arg);
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+            _timespec_sub(&end, &start);
+        } else {
+            fn(base, nmemb, size, compar, arg);
+        }
 out:
         __sync_fetch_and_sub(&entered, 1);
         _logtime(\"qsort_r\", end);
@@ -517,21 +534,26 @@ qsort (void *base, size_t nmemb, size_t size,
        int (*compar)(const void *, const void *))
 {
         struct timespec start, end;
-        void (*fn)(void *, size_t, size_t,
+        static void (*fn)(void *, size_t, size_t,
                    int (*compar)(const void *, const void *));
 
         __sync_fetch_and_add(&entered, 1);
-        _backtrace();
-        fn = dlsym(RTLD_NEXT, \"qsort\");
+        if (fn == NULL)
+            *(void**)(&fn) = dlsym(RTLD_NEXT, \"qsort\");
         if (fn == NULL){
             fprintf(stderr, \"dlsym: Error while loading symbol: <%s>\n\",
                     \"qsort\");
             goto out;
         }
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-        fn(base, nmemb, size, compar);
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-        _timespec_sub(&end, &start);
+        if (entered == 1) {
+            _backtrace();
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+            fn(base, nmemb, size, compar);
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+            _timespec_sub(&end, &start);
+        } else {
+            fn(base, nmemb, size, compar);
+        }
 out:
         __sync_fetch_and_sub(&entered, 1);
         _logtime(\"qsort\", end);
@@ -541,20 +563,25 @@ void
 pthread_cleanup_push (void (*routine)(void *), void *arg)
 {
         struct timespec start, end;
-        void (*fn)(void (*routine)(void *), void *arg);
+        static  void (*fn)(void (*routine)(void *), void *arg);
 
         __sync_fetch_and_add(&entered, 1);
-        _backtrace();
-        fn = dlsym(RTLD_NEXT, \"pthread_cleanup_push\");
+        if (fn == NULL)
+            *(void**)(&fn) = dlsym(RTLD_NEXT, \"pthread_cleanup_push\");
         if (fn == NULL){
             fprintf(stderr, \"dlsym: Error while loading symbol: <%s>\n\",
                     \"pthread_clean_up_push\");
             goto out;
         }
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-        fn(routine, arg);
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-        _timespec_sub(&end, &start);
+        if (entered == 1) {
+            _backtrace();
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+            fn(routine, arg);
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+            _timespec_sub(&end, &start);
+        } else {
+            fn(routine, arg);
+        }
 out:
         __sync_fetch_and_sub(&entered, 1);
         _logtime(\"pthread_cleanup_push\", end);
@@ -566,22 +593,27 @@ lsearch (const void *key, void *base, size_t *nmemb, size_t size,
 {
         void *rval;
         struct timespec start, end;
-        void * (*fn)(const void *, void *, size_t *, size_t,
+        static void * (*fn)(const void *, void *, size_t *, size_t,
                     int(*compar)(const void *, const void *));
 
         __sync_fetch_and_add(&entered, 1);
-        _backtrace();
-        fn = dlsym(RTLD_NEXT, \"lsearch\");
+        if (fn == NULL)
+            *(void**)(&fn) = dlsym(RTLD_NEXT, \"lsearch\");
         if (fn == NULL){
             fprintf(stderr, \"dlsym: Error while loading symbol: <%s>\n\",
                     \"lsearch\");
             goto out;
         }
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-        rval = fn(key, base, nmemb, size, compar);
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-        _timespec_sub(&end, &start);
-        _logtime(\"lsearch\", end);
+        if (entered == 1) {
+            _backtrace();
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+            rval = fn(key, base, nmemb, size, compar);
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+            _timespec_sub(&end, &start);
+            _logtime(\"lsearch\", end);
+        } else {
+            rval = fn(key, base, nmemb, size, compar);
+        }
 out:
         __sync_fetch_and_sub(&entered, 1);
         return rval;
@@ -593,22 +625,27 @@ lfind (const void *key, const void *base, size_t *nmemb, size_t size,
 {
         void *rval;
         struct timespec start, end;
-        void * (*fn)(const void *, void *, size_t *, size_t,
+        static void * (*fn)(const void *, void *, size_t *, size_t,
                      int(*compar)(const void *, const void *));
 
         __sync_fetch_and_add(&entered, 1);
-        _backtrace();
-        fn = dlsym(RTLD_NEXT, \"lfind\");
+        if (fn == NULL)
+            *(void**)(&fn) = dlsym(RTLD_NEXT, \"lfind\");
         if (fn == NULL){
             fprintf(stderr, \"dlsym: Error while loading symbol: <%s>\n\",
                     \"lfind\");
             goto out;
         }
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-        rval = fn(key, base, nmemb, size, compar);
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-        _timespec_sub(&end, &start);
-        _logtime(\"lfind\", end);
+        if (entered == 1) {
+            _backtrace();
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+            rval = fn(key, base, nmemb, size, compar);
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+            _timespec_sub(&end, &start);
+            _logtime(\"lfind\", end);
+        } else {
+             rval = fn(key, base, nmemb, size, compar);
+        }
 out:
         __sync_fetch_and_sub(&entered, 1);
         return rval;
@@ -620,22 +657,27 @@ bsearch (const void *key, const void *base, size_t nmemb, size_t size,
 {
         void *rval;
         struct timespec start, end;
-        void * (*fn)(const void *, void *, size_t *, size_t,
+        static void * (*fn)(const void *, void *, size_t *, size_t,
                      int(*compar)(const void *, const void *));
 
         __sync_fetch_and_add(&entered, 1);
-        _backtrace();
-        fn = dlsym(RTLD_NEXT, \"bsearch\");
+        if (fn == NULL)
+            *(void**)(&fn) = dlsym(RTLD_NEXT, \"bsearch\");
         if (fn == NULL){
             fprintf(stderr, \"dlsym: Error while loading symbol: <%s>\n\",
                     \"bsearch\");
             goto out;
         }
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-        rval = fn(key, base, nmemb, size, compar);
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-        _timespec_sub(&end, &start);
-        _logtime(\"bsearch\", end);
+        if (entered == 1) {
+            _backtrace();
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+            rval = fn(key, base, nmemb, size, compar);
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+            _timespec_sub(&end, &start);
+            _logtime(\"bsearch\", end);
+        } else {
+            rval = fn(key, base, nmemb, size, compar);
+        }
 out:
         __sync_fetch_and_sub(&entered, 1);
         return rval;
@@ -678,23 +720,27 @@ void *
 calloc(size_t nmemb, size_t size)
 {
         struct timespec start, end;
+        void * rval;
 
         __sync_fetch_and_add(&entered, 1);
         if (libc_calloc == NULL){
             libc_calloc = dummy_calloc;
             *(void **)(&temp_calloc) = dlsym(RTLD_NEXT, \"calloc\");
             libc_calloc = temp_calloc;
+            __sync_fetch_and_sub(&entered, 1);
+            return libc_calloc(nmemb, size);
         }
         void * (*fn)(size_t, size_t) = libc_calloc;
-        if (entered == 1)
-            _backtrace();
-        void * rval;
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-        rval = fn(nmemb, size);
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-        _timespec_sub(&end, &start);
-        if (entered == 1)
-            _logtime(\"calloc\", end);
+        if (entered == 1) {
+                _backtrace();
+                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+                rval = fn(nmemb, size);
+                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+                _timespec_sub(&end, &start);
+                _logtime(\"calloc\", end);
+        } else {
+                rval = fn(nmemb, size);
+        }
         __sync_fetch_and_sub(&entered, 1);
         return rval;
 }
@@ -706,21 +752,27 @@ free (void *ptr)
         struct timespec start, end;
 
         __sync_fetch_and_add(&entered, 1);
-        if (libc_free == NULL){
+        if (libc_free == NULL) {
             libc_free = dummy_free;
             *(void **)(&temp_free) = dlsym(RTLD_NEXT, \"free\");
             libc_free = temp_free;
+            libc_free(ptr);
+            __sync_fetch_and_sub(&entered, 1);
+            return;
         }
         void  (*fn)(void *) = libc_free;
-        if (entered == 1)
-            _backtrace();
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-        fn(ptr);
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-        _timespec_sub(&end, &start);
-        if (entered == 1)
-            _logtime(\"free\", end);
+        if (entered == 1) {
+                _backtrace();
+                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+                fn(ptr);
+                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+                _timespec_sub(&end, &start);
+                _logtime(\"free\", end);
+        } else {
+            fn(ptr);
+        }
         __sync_fetch_and_sub(&entered, 1);
+        return;
 }
 
 void *
@@ -731,8 +783,6 @@ malloc (size_t size)
 
         __sync_fetch_and_add(&entered, 1);
         static void * (*fn)(size_t );
-        if (entered == 1)
-            _backtrace();
         if (fn == NULL)
            *(void **)(&fn) = dlsym(RTLD_NEXT, \"malloc\");
         if (fn == NULL) {
@@ -740,12 +790,16 @@ malloc (size_t size)
                     \"malloc\");
             goto out;
         }
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-        rval = fn(size);
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-        _timespec_sub(&end, &start);
-        if (entered == 1)
+        if (entered == 1) {
+            _backtrace();
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+            rval = fn(size);
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+            _timespec_sub(&end, &start);
             _logtime(\"malloc\", end);
+        } else {
+            rval = fn(size);
+        }
 out:
         __sync_fetch_and_sub(&entered, 1);
         return rval;
@@ -754,12 +808,11 @@ out:
 void *
 realloc (void *ptr, size_t size)
 {
+        void * rval;
         struct timespec start, end;
         static void * (*fn)(void *, size_t);
 
         __sync_fetch_and_add(&entered, 1);
-        if (entered == 1)
-            _backtrace();
         if (fn == NULL)
            *(void **)(&fn) = dlsym(RTLD_NEXT, \"realloc\");
         if (fn == NULL) {
@@ -767,13 +820,16 @@ realloc (void *ptr, size_t size)
                     \"realloc\");
             goto out;
         }
-        void * rval;
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-        rval = fn(ptr, size);
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-        _timespec_sub(&end, &start);
-        if (entered == 1)
+        if (entered == 1) {
+            _backtrace();
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+            rval = fn(ptr, size);
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+            _timespec_sub(&end, &start);
             _logtime(\"realloc\", end);
+        } else {
+            rval = fn(ptr, size);
+        }
 out:
         __sync_fetch_and_sub(&entered, 1);
         return rval;
@@ -787,8 +843,6 @@ memalign (size_t alignment, size_t size)
         void * rval;
 
         __sync_fetch_and_add(&entered, 1);
-        if (entered == 1)
-            _backtrace();
         if (fn == NULL)
            *(void **)(&fn) = dlsym(RTLD_NEXT, \"memalign\");
         if (fn == NULL) {
@@ -885,10 +939,9 @@ function echo_wrapper()
     echo "$ftype"
     echo "$fname ($farg_prototypes)"
     echo "{"
-    echo "       __sync_fetch_and_add(&entered, 1);"
     echo "       struct timespec start, end;"
     echo "       static $ftype (*fn)($farg_signatures);"
-    echo "       _backtrace();"
+    echo "       __sync_fetch_and_add(&entered, 1);"
     echo "       if (fn == NULL)"
     echo "           *(void **)(&fn) = dlsym(RTLD_NEXT, \"$fname\");"
     echo "       if (fn == NULL){"
@@ -896,38 +949,58 @@ function echo_wrapper()
     echo "            goto out;"
     echo "       }"
     if [ "$farg_names" = "void" -a "$ftype" = "void " ]; then
-        echo "       clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);"
-        echo "       fn();"
-        echo "       clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);"
-        echo "       _timespec_sub(&end, &start);"
-        echo "       _logtime(\"$fname\", end);"
+        echo "       if (entered == 1) {"
+        echo "               _backtrace();"
+        echo "               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);"
+        echo "               fn();"
+        echo "               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);"
+        echo "               _timespec_sub(&end, &start);"
+        echo "               _logtime(\"$fname\", end);"
+        echo "       } else {"
+        echo "               fn();"
+        echo "       }"
         echo "out:"
         echo "       __sync_fetch_and_sub(&entered, 1);"
     elif [ "$farg_names" = "void"  -a "$ftype" != "void " ]; then
         echo "       $ftype rval;"
-        echo "       clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);"
-        echo "       rval = fn();"
-        echo "       clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);"
-        echo "       _timespec_sub(&end, &start);"
-        echo "       _logtime(\"$fname\", end);"
+        echo "       if (entered == 1) {"
+        echo "               _backtrace();"
+        echo "               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);"
+        echo "               rval = fn();"
+        echo "               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);"
+        echo "               _timespec_sub(&end, &start);"
+        echo "               _logtime(\"$fname\", end);"
+        echo "       } else {"
+        echo "               rval = fn();"
+        echo "       }"
         echo "out:"
         echo "       __sync_fetch_and_sub(&entered, 1);"
-        echo  "      return rval;"
+        echo "      return rval;"
     elif [ "$farg_names" != "void"  -a  "$ftype" = "void " ]; then
-        echo "       clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);"
-        echo "       fn($farg_names);"
-        echo "       _timespec_sub(&end, &start);"
-        echo "       _logtime(\"$fname\", end);"
-        echo "       clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);"
+        echo "       if (entered == 1) {"
+        echo "               _backtrace();"
+        echo "               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);"
+        echo "               fn($farg_names);"
+        echo "               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);"
+        echo "               _timespec_sub(&end, &start);"
+        echo "               _logtime(\"$fname\", end);"
+        echo "       } else {"
+        echo "               fn($farg_names);"
+        echo "       }"
         echo "out:"
         echo "       __sync_fetch_and_sub(&entered, 1);"
     else
         echo "       $ftype rval;"
-        echo "       clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);"
-        echo "       rval = fn($farg_names);"
-        echo "       clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);"
-        echo "       _timespec_sub(&end, &start);"
-        echo "       _logtime(\"$fname\", end);"
+        echo "       if (entered == 1) {"
+        echo "               _backtrace();"
+        echo "               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);"
+        echo "               rval = fn($farg_names);"
+        echo "               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);"
+        echo "               _timespec_sub(&end, &start);"
+        echo "               _logtime(\"$fname\", end);"
+        echo "       } else {"
+        echo "               rval = fn($farg_names);"
+        echo "       }"
         echo "out:"
         echo "       __sync_fetch_and_sub(&entered, 1);"
         echo "       return rval;"
