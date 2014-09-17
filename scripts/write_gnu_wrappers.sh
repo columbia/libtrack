@@ -48,6 +48,7 @@ function echo_header()
 #include <zlib.h>
 #include <sys/mman.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 
 #define MAX_FRAMES 128
 #define NAME_LEN 4096
@@ -58,6 +59,44 @@ volatile int*  __errno(void);
 
 __thread unsigned int entered = 0;
 "
+}
+
+
+function echo_fd_type_function()
+{
+echo "char fd_type(int fd)
+{
+        struct stat buf;
+        static int (*libc_getsockname)(int, struct sockaddr *, socklen_t *);
+
+        if (fstat(fd, &buf) < 0)
+                return '?';
+        if (S_ISREG(buf.st_mode))
+                return 'F';
+        if (S_ISDIR(buf.st_mode))
+                return 'f';
+        if (S_ISCHR(buf.st_mode) || S_ISBLK(buf.st_mode))
+                return 'D';
+        if (S_ISFIFO(buf.st_mode))
+                return 'P';
+        if (S_ISLNK(buf.st_mode))
+                return 'l';
+        if (S_ISSOCK(buf.st_mode)) {
+                struct sockaddr sam;
+                int len = sizeof(sam);
+                if (!libc_getsockname)
+                        libc_getsockname = dlsym(RTLD_NEXT, \"getsockname\");
+                if (!libc_getsockname)
+                        return '?';
+                if (libc_getsockname(fd, (struct sockaddr *)&sam, &len) < 0)
+                        return '?';
+                if (sam.sa_family == AF_UNIX || sam.sa_family == AF_LOCAL)
+                        return 'U';
+                return 'S';
+        }
+        return '?';
+}"
+echo ""
 }
 
 
@@ -114,7 +153,7 @@ _backtrace ()
                      libc_getpid(),syscall(SYS_gettid));
         fp = (libc_fopen)(name, \"a\");
         if (fp == NULL) {
-            fprintf(stderr, \"_backtrace: Error while opening: <%s>\n\", name);
+            libc_fprintf(stderr, \"_backtrace: Error while opening: <%s>\n\", name);
             return;
         }
         libc_fprintf(fp, \" T:BT:START:%d:\n\", nframes - 1);
@@ -141,10 +180,90 @@ _backtrace ()
                         line[j] = '\0';
                         break;
                     }
-                    libc_fprintf(fp, \" T::%d:SVAL:%s:OFFSET:%s:(DLIBASE)\n\",
-                                 i, sym, \"libc.so\");
                 }
+                libc_fprintf(fp, \" T::%d:SVAL:%s:OFFSET:%s:(DLIBASE)\n\",
+                                 i, sym, \"libc.so\");
             }
+        }
+        //libc_free(bt);
+        libc_fclose(fp);
+}"
+echo ""
+}
+
+
+function echo_backtrace_given_name_function()
+{
+    echo "
+/*
+ * Backtrace glibc functions and log them in a
+ * file coresponding to current thread's name.
+ */
+static void
+_backtrace_given_name (char *given_name)
+{
+        void  *frames[MAX_FRAMES];
+        char **bt;
+        size_t i, j, nframes;
+        FILE *fp;
+        char name[NAME_LEN];
+        char *lib;
+        char *sym;
+        char line[LINE_LEN];
+        static FILE * (*libc_fopen)(const char *, const char *);
+        static int (*libc_fclose)(FILE *);
+        static pid_t (*libc_getpid)(void);
+        static void  (*libc_free)(void *);
+        static int (*libc_backtrace)(void **, int);
+        static char ** (*libc_backtrace_symbols)(void *const *, int);
+        static int (*libc_sprintf)(char *, const char *, ...);
+        static int (*libc_fprintf)(char *, const char *, ...);
+        static char * (*libc_strncpy)(char *, const char *, size_t );
+
+        if (!libc_fopen)
+            *(void **) (&libc_fopen) = dlsym(RTLD_NEXT, \"fopen\");
+        if (!libc_fclose)
+            *(void **) (&libc_fclose) = dlsym(RTLD_NEXT, \"fclose\");
+        if (!libc_getpid)
+            *(void **) (&libc_getpid) = dlsym(RTLD_NEXT, \"getpid\");
+        if (!libc_free)
+            *(void **) (&libc_free) = dlsym(RTLD_NEXT, \"free\");
+        if (!libc_backtrace)
+            *(void **) (&libc_backtrace) = dlsym(RTLD_NEXT, \"backtrace\");
+        if (!libc_backtrace_symbols)
+            *(void **) (&libc_backtrace_symbols) = dlsym(RTLD_NEXT, \"backtrace_symbols\");
+        if (!libc_sprintf)
+            *(void **) (&libc_sprintf) = dlsym(RTLD_NEXT, \"sprintf\");
+        if (!libc_fprintf)
+            *(void **) (&libc_fprintf) = dlsym(RTLD_NEXT, \"fprintf\");
+        if (!libc_strncpy)
+             *(void **) (&libc_strncpy) = dlsym(RTLD_NEXT, \"strncpy\");
+
+        nframes = libc_backtrace(frames, MAX_FRAMES);
+        bt = libc_backtrace_symbols(frames, nframes);
+        libc_sprintf(name, \"%s.%ld.%ld.log\", \"__progname\",
+                     libc_getpid(),syscall(SYS_gettid));
+        fp = (libc_fopen)(name, \"a\");
+        if (fp == NULL) {
+            libc_fprintf(stderr, \"_backtrace: Error while opening: <%s>\n\", name);
+            return;
+        }
+        libc_fprintf(fp, \" T:BT:START:%d:\n\", nframes - 1);
+        for (i = 1; i < nframes; i++) {
+            libc_strncpy(line, bt[i],LINE_LEN);
+            for (j = 0;  j < LINE_LEN; j++)
+                if ( line[j] == '(' || line[j] == ' ') {
+                    line[j] = '\0';
+                    break;
+                }
+            lib = line;
+            if (i > 1) {
+                /* Format:  TIMESTAMP::STACKFRAMENO:SYMVAL:SYMNAME:SYMOFFSET:DLINAME:DLIBASE */
+                libc_fprintf(fp, \" T::%d:SVAL:??:OFFSET:%s:(DLIBASE):\n\", i, lib);
+                continue;
+            }
+            libc_fprintf(fp, \" T::%d:SVAL:%s:OFFSET:%s:(DLIBASE)\n\",
+                                 i, given_name, \"libc.so\");
         }
         //libc_free(bt);
         libc_fclose(fp);
@@ -749,7 +868,9 @@ function echo_wrapper()
 
 IFILE="$1"
 echo_header
+echo_fd_type_function
 echo_backtrace_function
+echo_backtrace_given_name_function
 echo_timespec_sub_function
 echo_logtime_function
 echo_special_wrappers
