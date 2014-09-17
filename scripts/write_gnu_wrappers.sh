@@ -850,43 +850,45 @@ memalign (size_t alignment, size_t size)
                     \"memalign\");
             goto out;
         }
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-        rval = fn(alignment, size);
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-        _timespec_sub(&end, &start);
-        if (entered == 1)
+        if (entered == 1) {
+            _backtrace();
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+            rval = fn(alignment, size);
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+            _timespec_sub(&end, &start);
             _logtime(\"memalign\", end);
+        } else {
+            rval = fn(alignment, size);
+        }
 out:
         __sync_fetch_and_sub(&entered, 1);
         return rval;
 }
 
-//
-//void *
-//memset (void *s, int c, size_t n)
-//{
-//        struct timespec start, end;
-//        static void * (*fn)(void *, int, size_t);
-//        __sync_fetch_and_add(&entered, 1);
-//        if (entered == 1)
-//            _backtrace();
-//        if (fn == NULL)
-//            fn = dlsym(RTLD_NEXT, \"memset\");
-//        if (fn == NULL){
-//            fprintf(stderr, \"dlsym: Error while loading symbol: <%s>\n\", \"memset\");
-//            goto out;
-//        }
-//        void *rval;
-//        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-//        rval = fn(s, c, n);
-//        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-//        _timespec_sub(&end, &start);
-//        if (entered == 1)
-//            _logtime(\"memset\", end);
-//out:
-//        __sync_fetch_and_sub(&entered, 1);
-//        return rval;
-//}
+
+void *
+memset (void *s, int c, size_t n)
+{
+        struct timespec start, end;
+        int i;
+
+        __sync_fetch_and_add(&entered, 1);
+        if (entered == 1) {
+                _backtrace();
+                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+                for (i = 0; i < n; i++)
+                        *((unsigned char *)s + i) = c;
+                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+                _timespec_sub(&end, &start);
+                _logtime("memset", end);
+        } else {
+               for (i = 0; i < n; i++)
+                       *((char *)s + i) = c;
+        }
+        __sync_fetch_and_sub(&entered, 1);
+        return s;
+}
+
 //
 //
 //int
