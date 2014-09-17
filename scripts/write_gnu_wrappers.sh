@@ -401,6 +401,25 @@ out:
        return rval;
 }
 
+pid_t
+fork (void)
+{
+        static pid_t  (*fn)(void);
+        __sync_fetch_and_add(&entered, 1);
+        if (fn == NULL)
+               *(void **)(&fn) = dlsym(RTLD_NEXT, \"fork\");
+        if (fn == NULL){
+                fprintf(stderr, \"dlsym: Error while loading symbol: <%s>\n\", \"fork\");
+                goto out;
+        }
+        if (entered == 1)
+                _backtrace();
+out:
+       __sync_fetch_and_sub(&entered, 1);
+       return  fn();
+}
+
+
 
 
 int
@@ -683,6 +702,50 @@ out:
         return rval;
 }
 
+int
+setjmp (jmp_buf env)
+{
+       struct timespec start, end;
+       static int  (*fn)(jmp_buf );
+       __sync_fetch_and_add(&entered, 1);
+       if (fn == NULL)
+           *(void **)(&fn) = dlsym(RTLD_NEXT, \"setjmp\");
+       if (fn == NULL){
+            fprintf(stderr, \"dlsym: Error while loading symbol: <%s>\n\", \"setjmp\");
+            goto out;
+       }
+       int  rval;
+       if (entered == 1)
+               _backtrace();
+       rval = fn(env);
+out:
+       __sync_fetch_and_sub(&entered, 1);
+       return rval;
+}
+
+
+void
+longjmp (jmp_buf env, int val)
+{
+       struct timespec start, end;
+       static void  (*fn)(jmp_buf , int );
+       __sync_fetch_and_add(&entered, 1);
+       if (fn == NULL)
+           *(void **)(&fn) = dlsym(RTLD_NEXT, \"longjmp\");
+       if (fn == NULL){
+            fprintf(stderr, \"dlsym: Error while loading symbol: <%s>\n\", \"longjmp\");
+            goto out;
+       }
+       if (entered == 1)
+               _backtrace();
+       fn(env, val);
+out:
+       __sync_fetch_and_sub(&entered, 1);
+}
+
+
+
+
 static void * (*libc_calloc)(size_t, size_t);
 static void * (*temp_calloc)(size_t nmemb, size_t size);
 static void (*libc_free)(void *);
@@ -880,7 +943,7 @@ memset (void *s, int c, size_t n)
                         *((unsigned char *)s + i) = c;
                 clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
                 _timespec_sub(&end, &start);
-                _logtime("memset", end);
+                _logtime(\"memset\", end);
         } else {
                for (i = 0; i < n; i++)
                        *((char *)s + i) = c;
