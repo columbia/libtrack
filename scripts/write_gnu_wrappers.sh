@@ -50,14 +50,30 @@ function echo_header()
 #include <sys/types.h>
 #include <sys/stat.h>
 
-#define MAX_FRAMES 128
+#define MAX_FRAMES 5
 #define NAME_LEN 4096
 #define LINE_LEN 4096
+#define BUF_LEN 8192
 
 extern char *__progname;
 volatile int*  __errno(void);
 
 __thread unsigned int entered = 0;
+__thread char filename[NAME_LEN];
+__thread char *thread_fp = NULL;
+
+static void * (*libc_calloc)(size_t, size_t);
+static void * (*temp_calloc)(size_t nmemb, size_t size);
+static void (*libc_free)(void *);
+static void (*temp_free)(void *);
+
+
+
+
+
+__thread char tmpbuf[BUF_LEN];
+__thread unsigned long tmppos = 0;
+__thread unsigned long tmpallocs = 0;
 "
 }
 
@@ -113,50 +129,49 @@ _backtrace ()
         void  *frames[MAX_FRAMES];
         char **bt;
         size_t i, j, nframes;
-        FILE *fp;
-        char name[NAME_LEN];
         char *lib;
         char *sym;
         char line[LINE_LEN];
         static FILE * (*libc_fopen)(const char *, const char *);
         static int (*libc_fclose)(FILE *);
         static pid_t (*libc_getpid)(void);
-        static void  (*libc_free)(void *);
-        static int (*libc_backtrace)(void **, int);
-        static char ** (*libc_backtrace_symbols)(void *const *, int);
         static int (*libc_sprintf)(char *, const char *, ...);
         static int (*libc_fprintf)(char *, const char *, ...);
+        static int (*libc_backtrace)(void **, int);
+        static char ** (*libc_backtrace_symbols)(void *const *, int);
         static char * (*libc_strncpy)(char *, const char *, size_t );
 
-        if (!libc_fopen)
-            *(void **) (&libc_fopen) = dlsym(RTLD_NEXT, \"fopen\");
-        if (!libc_fclose)
-            *(void **) (&libc_fclose) = dlsym(RTLD_NEXT, \"fclose\");
-        if (!libc_getpid)
-            *(void **) (&libc_getpid) = dlsym(RTLD_NEXT, \"getpid\");
-        if (!libc_free)
-            *(void **) (&libc_free) = dlsym(RTLD_NEXT, \"free\");
-        if (!libc_backtrace)
-            *(void **) (&libc_backtrace) = dlsym(RTLD_NEXT, \"backtrace\");
-        if (!libc_backtrace_symbols)
-            *(void **) (&libc_backtrace_symbols) = dlsym(RTLD_NEXT, \"backtrace_symbols\");
-        if (!libc_sprintf)
-            *(void **) (&libc_sprintf) = dlsym(RTLD_NEXT, \"sprintf\");
-        if (!libc_fprintf)
-            *(void **) (&libc_fprintf) = dlsym(RTLD_NEXT, \"fprintf\");
-        if (!libc_strncpy)
-             *(void **) (&libc_strncpy) = dlsym(RTLD_NEXT, \"strncpy\");
 
+
+        if (!libc_fopen)
+                *(void **) (&libc_fopen) = dlsym(RTLD_NEXT, \"fopen\");
+        if (!libc_fclose)
+                *(void **) (&libc_fclose) = dlsym(RTLD_NEXT, \"fclose\");
+        if (!libc_getpid)
+                *(void **) (&libc_getpid) = dlsym(RTLD_NEXT, \"getpid\");
+        if (!libc_backtrace)
+                *(void **) (&libc_backtrace) = dlsym(RTLD_NEXT, \"backtrace\");
+        if (!libc_backtrace_symbols)
+                *(void **) (&libc_backtrace_symbols) = dlsym(RTLD_NEXT, \"backtrace_symbols\");
+        if (!libc_sprintf)
+                *(void **) (&libc_sprintf) = dlsym(RTLD_NEXT, \"sprintf\");
+        if (!libc_fprintf)
+                *(void **) (&libc_fprintf) = dlsym(RTLD_NEXT, \"fprintf\");
+        if (!libc_strncpy)
+                *(void **) (&libc_strncpy) = dlsym(RTLD_NEXT, \"strncpy\");
+        if (!thread_fp) {
+                libc_sprintf(filename, \"%s.%ld.%ld.log\", \"__progname\",
+                                libc_getpid(),syscall(SYS_gettid));
+            thread_fp = (libc_fopen)(filename, \"a\");
+            if (thread_fp == NULL) {
+//                libc_fprintf(stderr, \"_backtrace: Error while opening: <%s>\n\", filename);
+                return;
+            }
+        }
         nframes = libc_backtrace(frames, MAX_FRAMES);
         bt = libc_backtrace_symbols(frames, nframes);
-        libc_sprintf(name, \"%s.%ld.%ld.log\", \"__progname\",
-                     libc_getpid(),syscall(SYS_gettid));
-        fp = (libc_fopen)(name, \"a\");
-        if (fp == NULL) {
-            libc_fprintf(stderr, \"_backtrace: Error while opening: <%s>\n\", name);
-            return;
-        }
-        libc_fprintf(fp, \" T:BT:START:%d:\n\", nframes - 1);
+
+        libc_fprintf(thread_fp, \" T:BT:START:%d:\n\", nframes - 1);
         for (i = 1; i < nframes; i++) {
             libc_strncpy(line, bt[i],LINE_LEN);
             for (j = 0;  j < LINE_LEN; j++)
@@ -167,12 +182,12 @@ _backtrace ()
             lib = line;
             if (i > 1) {
                 /* Format:  TIMESTAMP::STACKFRAMENO:SYMVAL:SYMNAME:SYMOFFSET:DLINAME:DLIBASE */
-                libc_fprintf(fp, \" T::%d:SVAL:??:OFFSET:%s:(DLIBASE):\n\", i, lib);
+                libc_fprintf(thread_fp, \" T::%d:SVAL:??:OFFSET:%s:(DLIBASE):\n\", i, lib);
                 continue;
             }
             sym = line + j + 1;
             if (*sym == '+') {
-                libc_fprintf(fp, \" T::%d:SVAL:??:OFFSET:%s:(DLIBASE)\n\",
+                libc_fprintf(thread_fp, \" T::%d:SVAL:??:OFFSET:%s:(DLIBASE)\n\",
                              i, \"libc.so\");
             } else {
                 for (; j < LINE_LEN ; j++) {
@@ -181,12 +196,12 @@ _backtrace ()
                         break;
                     }
                 }
-                libc_fprintf(fp, \" T::%d:SVAL:%s:OFFSET:%s:(DLIBASE)\n\",
+                libc_fprintf(thread_fp, \" T::%d:SVAL:%s:OFFSET:%s:(DLIBASE)\n\",
                                  i, sym, \"libc.so\");
             }
         }
-        //libc_free(bt);
-        libc_fclose(fp);
+////      libc_free(bt);
+////      libc_fclose(fp);
 }"
 echo ""
 }
@@ -205,50 +220,50 @@ _backtrace_given_name (char *given_name)
         void  *frames[MAX_FRAMES];
         char **bt;
         size_t i, j, nframes;
-        FILE *fp;
-        char name[NAME_LEN];
         char *lib;
         char *sym;
         char line[LINE_LEN];
+
         static FILE * (*libc_fopen)(const char *, const char *);
         static int (*libc_fclose)(FILE *);
         static pid_t (*libc_getpid)(void);
-        static void  (*libc_free)(void *);
-        static int (*libc_backtrace)(void **, int);
-        static char ** (*libc_backtrace_symbols)(void *const *, int);
         static int (*libc_sprintf)(char *, const char *, ...);
         static int (*libc_fprintf)(char *, const char *, ...);
+        static int (*libc_backtrace)(void **, int);
+        static char ** (*libc_backtrace_symbols)(void *const *, int);
         static char * (*libc_strncpy)(char *, const char *, size_t );
 
-        if (!libc_fopen)
-            *(void **) (&libc_fopen) = dlsym(RTLD_NEXT, \"fopen\");
-        if (!libc_fclose)
-            *(void **) (&libc_fclose) = dlsym(RTLD_NEXT, \"fclose\");
-        if (!libc_getpid)
-            *(void **) (&libc_getpid) = dlsym(RTLD_NEXT, \"getpid\");
-        if (!libc_free)
-            *(void **) (&libc_free) = dlsym(RTLD_NEXT, \"free\");
-        if (!libc_backtrace)
-            *(void **) (&libc_backtrace) = dlsym(RTLD_NEXT, \"backtrace\");
-        if (!libc_backtrace_symbols)
-            *(void **) (&libc_backtrace_symbols) = dlsym(RTLD_NEXT, \"backtrace_symbols\");
-        if (!libc_sprintf)
-            *(void **) (&libc_sprintf) = dlsym(RTLD_NEXT, \"sprintf\");
-        if (!libc_fprintf)
-            *(void **) (&libc_fprintf) = dlsym(RTLD_NEXT, \"fprintf\");
-        if (!libc_strncpy)
-             *(void **) (&libc_strncpy) = dlsym(RTLD_NEXT, \"strncpy\");
 
+        if (!libc_fopen)
+                *(void **) (&libc_fopen) = dlsym(RTLD_NEXT, \"fopen\");
+        if (!libc_fclose)
+                *(void **) (&libc_fclose) = dlsym(RTLD_NEXT, \"fclose\");
+        if (!libc_getpid)
+                *(void **) (&libc_getpid) = dlsym(RTLD_NEXT, \"getpid\");
+        if (!libc_backtrace)
+                *(void **) (&libc_backtrace) = dlsym(RTLD_NEXT, \"backtrace\");
+        if (!libc_backtrace_symbols)
+                *(void **) (&libc_backtrace_symbols) = dlsym(RTLD_NEXT, \"backtrace_symbols\");
+        if (!libc_sprintf)
+                *(void **) (&libc_sprintf) = dlsym(RTLD_NEXT, \"sprintf\");
+        if (!libc_fprintf)
+                *(void **) (&libc_fprintf) = dlsym(RTLD_NEXT, \"fprintf\");
+        if (!libc_strncpy)
+                *(void **) (&libc_strncpy) = dlsym(RTLD_NEXT, \"strncpy\");
+        if (!thread_fp) {
+                libc_sprintf(filename, \"%s.%ld.%ld.log\", \"__progname\",
+                                libc_getpid(),syscall(SYS_gettid));
+            thread_fp = (libc_fopen)(filename, \"a\");
+            if (thread_fp == NULL) {
+//                libc_fprintf(stderr, \"_backtrace_given_name: Error while opening: <%s>\n\", filename);
+                return;
+            }
+        }
+ 
         nframes = libc_backtrace(frames, MAX_FRAMES);
         bt = libc_backtrace_symbols(frames, nframes);
-        libc_sprintf(name, \"%s.%ld.%ld.log\", \"__progname\",
-                     libc_getpid(),syscall(SYS_gettid));
-        fp = (libc_fopen)(name, \"a\");
-        if (fp == NULL) {
-            libc_fprintf(stderr, \"_backtrace: Error while opening: <%s>\n\", name);
-            return;
-        }
-        libc_fprintf(fp, \" T:BT:START:%d:\n\", nframes - 1);
+
+        libc_fprintf(thread_fp, \" T:BT:START:%d:\n\", nframes - 1);
         for (i = 1; i < nframes; i++) {
             libc_strncpy(line, bt[i],LINE_LEN);
             for (j = 0;  j < LINE_LEN; j++)
@@ -259,14 +274,14 @@ _backtrace_given_name (char *given_name)
             lib = line;
             if (i > 1) {
                 /* Format:  TIMESTAMP::STACKFRAMENO:SYMVAL:SYMNAME:SYMOFFSET:DLINAME:DLIBASE */
-                libc_fprintf(fp, \" T::%d:SVAL:??:OFFSET:%s:(DLIBASE):\n\", i, lib);
+                libc_fprintf(thread_fp, \" T::%d:SVAL:??:OFFSET:%s:(DLIBASE):\n\", i, lib);
                 continue;
             }
-            libc_fprintf(fp, \" T::%d:SVAL:%s:OFFSET:%s:(DLIBASE)\n\",
+            libc_fprintf(thread_fp, \" T::%d:SVAL:%s:OFFSET:%s:(DLIBASE)\n\",
                                  i, given_name, \"libc.so\");
         }
-        //libc_free(bt);
-        libc_fclose(fp);
+////        libc_free(bt);
+////        libc_fclose(fp);
 }"
 echo ""
 }
@@ -302,8 +317,6 @@ function echo_logtime_function()
 void
 _logtime (char *funcname, struct timespec end)
 {
-        FILE *fp;
-        char name[NAME_LEN];
         static FILE * (*libc_fopen)(const char *, const char *);
         static int (*libc_fclose)(FILE *);
         static pid_t (*libc_getpid)(void);
@@ -312,24 +325,27 @@ _logtime (char *funcname, struct timespec end)
 
         if (!libc_fopen)
             *(void **) (&libc_fopen) = dlsym(RTLD_NEXT, \"fopen\");
-        if (!libc_fclose)
-            *(void **) (&libc_fclose) = dlsym(RTLD_NEXT, \"fclose\");
+//        if (!libc_fclose)
+//            *(void **) (&libc_fclose) = dlsym(RTLD_NEXT, \"fclose\");
         if (!libc_getpid)
             *(void **) (&libc_getpid) = dlsym(RTLD_NEXT, \"getpid\");
         if (!libc_sprintf)
             *(void **) (&libc_sprintf) = dlsym(RTLD_NEXT, \"sprintf\");
         if (!libc_fprintf)
             *(void **) (&libc_fprintf) = dlsym(RTLD_NEXT, \"fprintf\");
-        libc_sprintf(name, \"%s.%ld.%ld.log\", \"__progname\", libc_getpid(),
-                syscall(SYS_gettid));
-        fp = libc_fopen(name, \"a\");
-        if (fp == NULL) {
-            libc_fprintf(stderr, \"_logtime: Error while opening: <%s>\n\", name);
-            return;
+        if (thread_fp == NULL) {
+                libc_sprintf(filename, \"%s.%ld.%ld.log\", \"__progname\",
+                                libc_getpid(),syscall(SYS_gettid));
+                thread_fp = libc_fopen(filename, \"a\");
+                if (thread_fp == NULL) {
+//                        libc_fprintf(stderr, \"_logtime: Error while opening: <%s>\n\", filename);
+                        return;
+                }
         }
-        libc_fprintf(fp, \" T.T:LOG:T:%s::%lu.%lu\n\", funcname,
+        libc_fprintf(thread_fp, \" T.T:LOG:T:%s::%lu.%lu\n\", funcname,
                      (unsigned long) end.tv_sec, (unsigned long) end.tv_nsec);
-        libc_fclose(fp);
+////        libc_free(bt);
+////        libc_fclose(fp);
 }"
     echo ""
 }
@@ -355,12 +371,12 @@ read (int fd, void *buf, size_t count)
         if (entered == 1) {
                 char name[] = \"read_?\";
                 name[5] = fd_type(fd);
-                _backtrace_given_name(name);
+                _backtrace_given_name("name");
                 clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
                 rval = fn(fd, buf, count);
                 clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
                 _timespec_sub(&end, &start);
-                _logtime(name, end);
+//                _logtime(name, end);
         } else {
                 rval = fn(fd, buf, count);
         }
@@ -746,15 +762,6 @@ out:
 
 
 
-static void * (*libc_calloc)(size_t, size_t);
-static void * (*temp_calloc)(size_t nmemb, size_t size);
-static void (*libc_free)(void *);
-static void (*temp_free)(void *);
-
-char tmpbuf[1024];
-unsigned long tmppos = 0;
-unsigned long tmpallocs = 0;
-
 void* dummy_malloc(size_t size)
 {
     if (tmppos + size >= sizeof(tmpbuf))
@@ -929,7 +936,6 @@ out:
 }
 
 
-
 void *
 libc_memset (void *dstpp, int sc, size_t len)
 {
@@ -1010,7 +1016,7 @@ memset (void *s, int c, size_t n)
                 rval = libc_memset(s, c, n);
                 clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
                 _timespec_sub(&end, &start);
-                _logtime("memset", end);
+                _logtime(\"memset\", end);
         } else {
                 rval = libc_memset(s, c, n);
         }
