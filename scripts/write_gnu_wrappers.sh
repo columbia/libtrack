@@ -929,28 +929,96 @@ out:
 }
 
 
+
+void *
+libc_memset (void *dstpp, int sc, size_t len)
+{
+        int OPSIZ = sizeof(long);
+        typedef unsigned long op_t;
+
+
+        unsigned int c = sc;
+        long int dstp = (long int) dstpp;
+
+        if (len >= 8)
+        {
+                size_t xlen;
+                op_t cccc;
+
+                cccc = (unsigned char) c;
+                cccc |= cccc << 8;
+                cccc |= cccc << 16;
+                if (OPSIZ > 4)
+                /* Do the shift in two steps to avoid warning if long has 32 bits.  */
+                        cccc |= (cccc << 16) << 16;
+
+                /* There are at least some bytes to set.
+                    No need to test for LEN == 0 in this alignment loop.  */
+                while (dstp % OPSIZ != 0)
+                {
+                        ((unsigned char *) dstp)[0] = c;
+                        dstp += 1;
+                        len -= 1;
+                }
+
+                xlen = len / (OPSIZ * 8);
+                while (xlen > 0)
+                {
+                        ((op_t *) dstp)[0] = cccc;
+                        ((op_t *) dstp)[1] = cccc;
+                        ((op_t *) dstp)[2] = cccc;
+                        ((op_t *) dstp)[3] = cccc;
+                        ((op_t *) dstp)[4] = cccc;
+                        ((op_t *) dstp)[5] = cccc;
+                        ((op_t *) dstp)[6] = cccc;
+                        ((op_t *) dstp)[7] = cccc;
+                        dstp += 8 * OPSIZ;
+                        xlen -= 1;
+                }
+                len %= OPSIZ * 8;
+
+                xlen = len / OPSIZ;
+                while (xlen > 0)
+                {
+                        ((op_t *) dstp)[0] = cccc;
+                        dstp += OPSIZ;
+                        xlen -= 1;
+                }
+                len %= OPSIZ;
+        }
+
+        /* Write the last few bytes.  */
+        while (len > 0)
+        {
+                ((unsigned char *) dstp)[0] = c;
+                dstp += 1;
+                len -= 1;
+        }
+        return dstpp;
+}
+
 void *
 memset (void *s, int c, size_t n)
 {
         struct timespec start, end;
-        int i;
+      void *rval;
 
         __sync_fetch_and_add(&entered, 1);
         if (entered == 1) {
                 _backtrace();
                 clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-                for (i = 0; i < n; i++)
-                        *((unsigned char *)s + i) = c;
+                rval = libc_memset(s, c, n);
                 clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
                 _timespec_sub(&end, &start);
-                _logtime(\"memset\", end);
+                _logtime("memset", end);
         } else {
-               for (i = 0; i < n; i++)
-                       *((char *)s + i) = c;
+                rval = libc_memset(s, c, n);
         }
         __sync_fetch_and_sub(&entered, 1);
         return s;
 }
+
+
 
 //
 //
