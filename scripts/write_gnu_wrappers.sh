@@ -1,10 +1,5 @@
 #!/bin/bash
 
-if [ "$#" -ne 1 ]; then
-    echo "Usage: $0 prototypes_file"
-    exit -1
-fi
-
 HEADER="/home/vatlidak/repos/systrace/arch/x86/include/header.h"
 BACKTRACE="/home/vatlidak/repos/systrace/arch/x86/src/backtrace.c"
 LOGTIME="/home/vatlidak/repos/systrace/arch/x86/src/logtime.c"
@@ -126,12 +121,11 @@ function echo_wrapper()
     echo ""
 }
 
-IFILE="$1"
 cat ${HEADER} > temp.c
 cat ${BACKTRACE} >> temp.c
 cat ${LOGTIME} >> temp.c
 cat ${SPECIAL} >> temp.c
 cat ${MISC} >> temp.c
-cat ${GNU_EXTENSIONS} >> temp.c
+#cat ${GNU_EXTENSIONS} >> temp.c
 make
 rm temp.c

@@ -65,8 +65,6 @@ function usage() {
 	echo -e ""
 	echo -e "\t--lib path/to/library           Library (or directory of libraries) to search for syscalls"
 	echo -e ""
-	echo -e "\t--names path/to/func/names      Library (or directory of libraries) to search for syscalls"
-	echo -e ""
 	echo -e "\t--type {elf|macho}              Specify the type of input library (avoid auto-detection)"
 	echo -e ""
 	echo -e "\t--out output/dir                Directory to put output C wrappers (defaults to .)"
@@ -99,15 +97,6 @@ while [[ ! -z "$1" ]]; do
 				echo "E: Invalid priority!"
 				usage
 			fi
-			shift
-			;;
-		--names )
-            if [ ! -f "$2" ]; then
-                echo "E: Missing protypes file"
-                usage
-            fi
-			NAMFILE="$2"
-			shift
 			shift
 			;;
     --wrap-specific )
@@ -167,7 +156,7 @@ if [ "$ARCH" = "x86" ]; then
         exit -1
     else
         cd ${CDIR}/scripts
-        ${CDIR}/scripts/write_gnu_wrappers.sh  ${NAMFILE}
+        ${CDIR}/scripts/write_gnu_wrappers.sh
         cd ..
         [ -d ${OUTDIR} ] || mkdir ${OUTDIR}
         mv  ${CDIR}/scripts/interpose.so ${OUTDIR}]
