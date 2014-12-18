@@ -159,7 +159,7 @@ if [ "$ARCH" = "x86" ]; then
         ${CDIR}/scripts/write_gnu_wrappers.sh
         cd ..
         [ -d ${OUTDIR} ] || mkdir ${OUTDIR}
-        mv  ${CDIR}/scripts/interpose.so ${OUTDIR}]
+        mv  ${CDIR}/scripts/interpose.so ${OUTDIR}
     exit 0
     fi
 fi
