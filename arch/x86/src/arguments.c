@@ -252,9 +252,6 @@ out:
        __sync_fetch_and_sub(&entered, 1);
        return rval;
 }
-
-
-
 /*
  * End of Arguments
  */

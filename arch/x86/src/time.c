@@ -1,5 +1,5 @@
 /*
- * time
+ * Time
  */
 int 
 utime (const char *filename, const struct utimbuf *times)
@@ -844,4 +844,3 @@ out:
 /* 
  * End of time
  */
-

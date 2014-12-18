@@ -1,5 +1,5 @@
 /*
- * threads
+ * Pthreads
  */
 int 
 pthread_attr_destroy (pthread_attr_t *attr)
@@ -975,5 +975,5 @@ out:
        __sync_fetch_and_sub(&entered, 1);
 }
 /*
- * End of pthreads
+ * End of Pthreads
  */

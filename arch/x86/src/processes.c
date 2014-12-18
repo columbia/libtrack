@@ -1,5 +1,5 @@
 /*
- * Processes & signals
+ * Processes & Signals
  */
 pid_t 
 wait (int *status)

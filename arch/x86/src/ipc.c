@@ -1,5 +1,5 @@
 /*
- * ipc
+ * IPC
  */
 int 
 shmctl (int shmid, int cmd, struct shmid_ds *buf)
@@ -841,5 +841,5 @@ out:
        return rval;
 }
 /*
- * End of ipc
+ * End of IPC
  */
