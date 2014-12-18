@@ -29,7 +29,7 @@ install_wraper: build_wrapper
 	@echo "Reboot in recovery mode"
 	@$(ADB) reboot recovery
 	@echo "Wait 40sec before mounting system"
-	@sleep 40
+	@sleep 30
 	@$(ADB) shell mount -o rw -t ext4 /dev/block/mmcblk0p3 /system
 	@cd ./$(OUT)/$(LIB)/jni/ && \
 		make install
