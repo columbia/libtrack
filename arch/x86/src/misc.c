@@ -544,20 +544,11 @@ fexecve (int fd, char *const argv[], char *const envp[])
             fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "fexecve");
             goto out;
        }
-       int  rval;
-       if (entered == 1) {
+       if (entered == 1)
                _backtrace();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-               rval = fn(fd, argv, envp);
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-               _timespec_sub(&end, &start);
-               _logtime("fexecve", end);
-       } else {
-               rval = fn(fd, argv, envp);
-       }
 out:
        __sync_fetch_and_sub(&entered, 1);
-       return rval;
+       return fn(fd, argv, envp);
 }
 
 

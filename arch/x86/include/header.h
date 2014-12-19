@@ -40,7 +40,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
-#define MAX_FRAMES 50
+#define MAX_FRAMES 5
 #define NAME_LEN 4096
 #define LINE_LEN 4096
 #define BUF_LEN 8192
@@ -54,10 +54,7 @@ __thread char tmpbuf[BUF_LEN];
 __thread unsigned long tmppos = 0;
 __thread unsigned long tmpallocs = 0;
 
-
 static void * (*libc_calloc)(size_t, size_t);
 static void * (*temp_calloc)(size_t nmemb, size_t size);
 static void (*libc_free)(void *);
 static void (*temp_free)(void *);
-
-

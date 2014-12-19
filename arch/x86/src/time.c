@@ -254,34 +254,6 @@ out:
 }
 
 int 
-gettimeofday (struct timeval *tv, struct timezone *tz)
-{
-       struct timespec start, end;
-       static int  (*fn)(struct timeval *, struct timezone *);
-       __sync_fetch_and_add(&entered, 1);
-       if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "gettimeofday");
-       if (fn == NULL){
-            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "gettimeofday");
-            goto out;
-       }
-       int  rval;
-       if (entered == 1) {
-               _backtrace();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-               rval = fn(tv, tz);
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-               _timespec_sub(&end, &start);
-               _logtime("gettimeofday", end);
-       } else {
-               rval = fn(tv, tz);
-       }
-out:
-       __sync_fetch_and_sub(&entered, 1);
-       return rval;
-}
-
-int 
 getitimer (int which, struct itimerval *curr_value)
 {
        struct timespec start, end;
@@ -388,62 +360,6 @@ clock_getres (clockid_t clk_id, struct timespec *res)
                _logtime("clock_getres", end);
        } else {
                rval = fn(clk_id, res);
-       }
-out:
-       __sync_fetch_and_sub(&entered, 1);
-       return rval;
-}
-
-int 
-nanosleep (const struct timespec *req, struct timespec *rem)
-{
-       struct timespec start, end;
-       static int  (*fn)(const struct timespec *, struct timespec *);
-       __sync_fetch_and_add(&entered, 1);
-       if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "nanosleep");
-       if (fn == NULL){
-            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "nanosleep");
-            goto out;
-       }
-       int  rval;
-       if (entered == 1) {
-               _backtrace();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-               rval = fn(req, rem);
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-               _timespec_sub(&end, &start);
-               _logtime("nanosleep", end);
-       } else {
-               rval = fn(req, rem);
-       }
-out:
-       __sync_fetch_and_sub(&entered, 1);
-       return rval;
-}
-
-int 
-clock_nanosleep (clockid_t clock_id, int flags, const struct timespec *request, struct timespec *remain)
-{
-       struct timespec start, end;
-       static int  (*fn)(clockid_t , int , const struct timespec *, struct timespec *);
-       __sync_fetch_and_add(&entered, 1);
-       if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "clock_nanosleep");
-       if (fn == NULL){
-            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "clock_nanosleep");
-            goto out;
-       }
-       int  rval;
-       if (entered == 1) {
-               _backtrace();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-               rval = fn(clock_id, flags, request, remain);
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-               _timespec_sub(&end, &start);
-               _logtime("clock_nanosleep", end);
-       } else {
-               rval = fn(clock_id, flags, request, remain);
        }
 out:
        __sync_fetch_and_sub(&entered, 1);

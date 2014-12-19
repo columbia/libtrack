@@ -3,10 +3,21 @@
 HEADER="/home/vatlidak/repos/systrace/arch/x86/include/header.h"
 BACKTRACE="/home/vatlidak/repos/systrace/arch/x86/src/backtrace.c"
 LOGTIME="/home/vatlidak/repos/systrace/arch/x86/src/logtime.c"
-SPECIAL="/home/vatlidak/repos/systrace/arch/x86/src/special.c"
-MISC="/home/vatlidak/repos/systrace/arch/x86/src/misc.c"
-GNU_EXTENSIONS="/home/vatlidak/repos/systrace/arch/x86/src/gnu_extensions.c"
 
+GNU_EXTENSIONS="/home/vatlidak/repos/systrace/arch/x86/src/gnu_extensions.c"
+SPECIAL="/home/vatlidak/repos/systrace/arch/x86/src/special.c"
+ALGO="/home/vatlidak/repos/systrace/arch/x86/src/algorithms.c"
+ARGS="/home/vatlidak/repos/systrace/arch/x86/src/arguments.c"
+FS="/home/vatlidak/repos/systrace/arch/x86/src/fs.c"
+IPC="/home/vatlidak/repos/systrace/arch/x86/src/ipc.c"
+MEM="/home/vatlidak/repos/systrace/arch/x86/src/memory.c"
+NET="/home/vatlidak/repos/systrace/arch/x86/src/network.c"
+PROC="/home/vatlidak/repos/systrace/arch/x86/src/processes.c"
+PTHREADS="/home/vatlidak/repos/systrace/arch/x86/src/pthreads.c"
+TERM="/home/vatlidak/repos/systrace/arch/x86/src/terminals.c"
+TIME="/home/vatlidak/repos/systrace/arch/x86/src/time.c"
+MISC="/home/vatlidak/repos/systrace/arch/x86/src/misc.c"
+#
 if [ ! -f $HEADER ]; then
     echo "Missing HEADER"
     exit -1
@@ -125,7 +136,19 @@ cat ${HEADER} > temp.c
 cat ${BACKTRACE} >> temp.c
 cat ${LOGTIME} >> temp.c
 cat ${SPECIAL} >> temp.c
-cat ${MISC} >> temp.c
+cat ${FS} >> temp.c
+cat ${IPC} >> temp.c
+cat ${MEM} >> temp.c
+cat ${NET} >> temp.c
+cat ${PROC} >> temp.c
+cat ${PTHREADS} >> temp.c
+cat ${TERM} >> temp.c
+cat ${TIME} >> temp.c
+##
+#cat ${MISC} >> temp.c
+#cat ${ALGO} >> temp.c
+#cat ${ARGS} >> temp.c
 #cat ${GNU_EXTENSIONS} >> temp.c
+
 make
 rm temp.c

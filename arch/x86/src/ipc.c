@@ -29,6 +29,34 @@ out:
        return rval;
 }
 
+void *
+shmat (int shmid, const void *shmaddr, int shmflg)
+{
+       struct timespec start, end;
+       static void * (*fn)(int , const void *, int );
+       __sync_fetch_and_add(&entered, 1);
+       if (fn == NULL)
+           *(void **)(&fn) = dlsym(RTLD_NEXT, "shmat");
+       if (fn == NULL){
+            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "shmat");
+            goto out;
+       }
+       void * rval;
+       if (entered == 1) {
+               _backtrace();
+               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+               rval = fn(shmid, shmaddr, shmflg);
+               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+               _timespec_sub(&end, &start);
+               _logtime("shmat", end);
+       } else {
+               rval = fn(shmid, shmaddr, shmflg);
+       }
+out:
+       __sync_fetch_and_sub(&entered, 1);
+       return rval;
+}
+
 int 
 shmdt (const void *shmaddr)
 {
@@ -471,34 +499,6 @@ sem_unlink (const char *name)
                _logtime("sem_unlink", end);
        } else {
                rval = fn(name);
-       }
-out:
-       __sync_fetch_and_sub(&entered, 1);
-       return rval;
-}
-
-int 
-sem_wait (sem_t *sem)
-{
-       struct timespec start, end;
-       static int  (*fn)(sem_t *);
-       __sync_fetch_and_add(&entered, 1);
-       if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "sem_wait");
-       if (fn == NULL){
-            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "sem_wait");
-            goto out;
-       }
-       int  rval;
-       if (entered == 1) {
-               _backtrace();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-               rval = fn(sem);
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-               _timespec_sub(&end, &start);
-               _logtime("sem_wait", end);
-       } else {
-               rval = fn(sem);
        }
 out:
        __sync_fetch_and_sub(&entered, 1);

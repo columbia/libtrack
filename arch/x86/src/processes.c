@@ -1,62 +1,6 @@
 /*
  * Processes & Signals
  */
-pid_t 
-wait (int *status)
-{
-       struct timespec start, end;
-       static pid_t  (*fn)(int *);
-       __sync_fetch_and_add(&entered, 1);
-       if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "wait");
-       if (fn == NULL){
-            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "wait");
-            goto out;
-       }
-       pid_t  rval;
-       if (entered == 1) {
-               _backtrace();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-               rval = fn(status);
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-               _timespec_sub(&end, &start);
-               _logtime("wait", end);
-       } else {
-               rval = fn(status);
-       }
-out:
-       __sync_fetch_and_sub(&entered, 1);
-       return rval;
-}
-
-pid_t 
-waitpid (pid_t pid, int *status, int options)
-{
-       struct timespec start, end;
-       static pid_t  (*fn)(pid_t , int *, int );
-       __sync_fetch_and_add(&entered, 1);
-       if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "waitpid");
-       if (fn == NULL){
-            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "waitpid");
-            goto out;
-       }
-       pid_t  rval;
-       if (entered == 1) {
-               _backtrace();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-               rval = fn(pid, status, options);
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-               _timespec_sub(&end, &start);
-               _logtime("waitpid", end);
-       } else {
-               rval = fn(pid, status, options);
-       }
-out:
-       __sync_fetch_and_sub(&entered, 1);
-       return rval;
-}
-
 sighandler_t 
 sigset (int sig, sighandler_t disp)
 {
@@ -195,60 +139,6 @@ system (const char *command)
 out:
        __sync_fetch_and_sub(&entered, 1);
        return rval;
-}
-
-unsigned int 
-sleep (unsigned int seconds)
-{
-       struct timespec start, end;
-       static unsigned int  (*fn)(unsigned int );
-       __sync_fetch_and_add(&entered, 1);
-       if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "sleep");
-       if (fn == NULL){
-            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "sleep");
-            goto out;
-       }
-       unsigned int  rval;
-       if (entered == 1) {
-               _backtrace();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-               rval = fn(seconds);
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-               _timespec_sub(&end, &start);
-               _logtime("sleep", end);
-       } else {
-               rval = fn(seconds);
-       }
-out:
-       __sync_fetch_and_sub(&entered, 1);
-       return rval;
-}
-
-void 
-abort (void)
-{
-       struct timespec start, end;
-       static void  (*fn)();
-       __sync_fetch_and_add(&entered, 1);
-       if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "abort");
-       if (fn == NULL){
-            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "abort");
-            goto out;
-       }
-       if (entered == 1) {
-               _backtrace();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-               fn();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-               _timespec_sub(&end, &start);
-               _logtime("abort", end);
-       } else {
-               fn();
-       }
-out:
-       __sync_fetch_and_sub(&entered, 1);
 }
 
 int 
@@ -532,34 +422,6 @@ out:
 }
 
 int 
-sigpause (int sigmask)
-{
-       struct timespec start, end;
-       static int  (*fn)(int );
-       __sync_fetch_and_add(&entered, 1);
-       if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "sigpause");
-       if (fn == NULL){
-            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "sigpause");
-            goto out;
-       }
-       int  rval;
-       if (entered == 1) {
-               _backtrace();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-               rval = fn(sigmask);
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-               _timespec_sub(&end, &start);
-               _logtime("sigpause", end);
-       } else {
-               rval = fn(sigmask);
-       }
-out:
-       __sync_fetch_and_sub(&entered, 1);
-       return rval;
-}
-
-int 
 sigpending (sigset_t *set)
 {
        struct timespec start, end;
@@ -665,118 +527,6 @@ sigrelse (int sig)
                _logtime("sigrelse", end);
        } else {
                rval = fn(sig);
-       }
-out:
-       __sync_fetch_and_sub(&entered, 1);
-       return rval;
-}
-
-int 
-sigsuspend (const sigset_t *mask)
-{
-       struct timespec start, end;
-       static int  (*fn)(const sigset_t *);
-       __sync_fetch_and_add(&entered, 1);
-       if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "sigsuspend");
-       if (fn == NULL){
-            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "sigsuspend");
-            goto out;
-       }
-       int  rval;
-       if (entered == 1) {
-               _backtrace();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-               rval = fn(mask);
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-               _timespec_sub(&end, &start);
-               _logtime("sigsuspend", end);
-       } else {
-               rval = fn(mask);
-       }
-out:
-       __sync_fetch_and_sub(&entered, 1);
-       return rval;
-}
-
-int 
-sigtimedwait (const sigset_t *set, siginfo_t *info, const struct timespec *timeout)
-{
-       struct timespec start, end;
-       static int  (*fn)(const sigset_t *, siginfo_t *, const struct timespec *);
-       __sync_fetch_and_add(&entered, 1);
-       if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "sigtimedwait");
-       if (fn == NULL){
-            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "sigtimedwait");
-            goto out;
-       }
-       int  rval;
-       if (entered == 1) {
-               _backtrace();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-               rval = fn(set, info, timeout);
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-               _timespec_sub(&end, &start);
-               _logtime("sigtimedwait", end);
-       } else {
-               rval = fn(set, info, timeout);
-       }
-out:
-       __sync_fetch_and_sub(&entered, 1);
-       return rval;
-}
-
-int 
-sigwait (const sigset_t *set, int *sig)
-{
-       struct timespec start, end;
-       static int  (*fn)(const sigset_t *, int *);
-       __sync_fetch_and_add(&entered, 1);
-       if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "sigwait");
-       if (fn == NULL){
-            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "sigwait");
-            goto out;
-       }
-       int  rval;
-       if (entered == 1) {
-               _backtrace();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-               rval = fn(set, sig);
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-               _timespec_sub(&end, &start);
-               _logtime("sigwait", end);
-       } else {
-               rval = fn(set, sig);
-       }
-out:
-       __sync_fetch_and_sub(&entered, 1);
-       return rval;
-}
-
-int 
-sigwaitinfo (const sigset_t *set, siginfo_t *info)
-{
-       struct timespec start, end;
-       static int  (*fn)(const sigset_t *, siginfo_t *);
-       __sync_fetch_and_add(&entered, 1);
-       if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "sigwaitinfo");
-       if (fn == NULL){
-            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "sigwaitinfo");
-            goto out;
-       }
-       int  rval;
-       if (entered == 1) {
-               _backtrace();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-               rval = fn(set, info);
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-               _timespec_sub(&end, &start);
-               _logtime("sigwaitinfo", end);
-       } else {
-               rval = fn(set, info);
        }
 out:
        __sync_fetch_and_sub(&entered, 1);
@@ -1063,34 +813,6 @@ out:
        return rval;
 }
 
-int 
-sched_yield (void)
-{
-       struct timespec start, end;
-       static int  (*fn)();
-       __sync_fetch_and_add(&entered, 1);
-       if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "sched_yield");
-       if (fn == NULL){
-            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "sched_yield");
-            goto out;
-       }
-       int  rval;
-       if (entered == 1) {
-               _backtrace();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-               rval = fn();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-               _timespec_sub(&end, &start);
-               _logtime("sched_yield", end);
-       } else {
-               rval = fn();
-       }
-out:
-       __sync_fetch_and_sub(&entered, 1);
-      return rval;
-}
-
 void 
 psiginfo (const siginfo_t *pinfo, const char *s)
 {
@@ -1141,34 +863,6 @@ psignal (int sig, const char *s)
        }
 out:
        __sync_fetch_and_sub(&entered, 1);
-}
-
-int 
-pause (void)
-{
-       struct timespec start, end;
-       static int  (*fn)();
-       __sync_fetch_and_add(&entered, 1);
-       if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "pause");
-       if (fn == NULL){
-            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pause");
-            goto out;
-       }
-       int  rval;
-       if (entered == 1) {
-               _backtrace();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-               rval = fn();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-               _timespec_sub(&end, &start);
-               _logtime("pause", end);
-       } else {
-               rval = fn();
-       }
-out:
-       __sync_fetch_and_sub(&entered, 1);
-      return rval;
 }
 
 int 
@@ -1445,34 +1139,6 @@ alarm (unsigned int seconds)
                _logtime("alarm", end);
        } else {
                rval = fn(seconds);
-       }
-out:
-       __sync_fetch_and_sub(&entered, 1);
-       return rval;
-}
-
-void *
-shmat (int shmid, const void *shmaddr, int shmflg)
-{
-       struct timespec start, end;
-       static void * (*fn)(int , const void *, int );
-       __sync_fetch_and_add(&entered, 1);
-       if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "shmat");
-       if (fn == NULL){
-            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "shmat");
-            goto out;
-       }
-       void * rval;
-       if (entered == 1) {
-               _backtrace();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-               rval = fn(shmid, shmaddr, shmflg);
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-               _timespec_sub(&end, &start);
-               _logtime("shmat", end);
-       } else {
-               rval = fn(shmid, shmaddr, shmflg);
        }
 out:
        __sync_fetch_and_sub(&entered, 1);
