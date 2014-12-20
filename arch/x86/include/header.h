@@ -40,7 +40,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
-#define MAX_FRAMES 5
+#define MAX_FRAMES 10
 #define NAME_LEN 4096
 #define LINE_LEN 4096
 #define BUF_LEN 8192

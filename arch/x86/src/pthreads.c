@@ -1,6 +1,34 @@
 /*
  * Pthreads
  */
+pthread_t
+pthread_self(void)
+{
+       struct timespec start, end;
+       static int  (*fn)(void);
+       __sync_fetch_and_add(&entered, 1);
+       if (fn == NULL)
+           *(void **)(&fn) = dlsym(RTLD_NEXT, "pthread_self");
+       if (fn == NULL){
+            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_self");
+            goto out;
+       }
+       pthread_t  rval;
+       if (entered == 1) {
+               _backtrace();
+               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+               rval = fn();
+               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+               _timespec_sub(&end, &start);
+               _logtime("pthread_attr_destroy", end);
+       } else {
+               rval = fn();
+       }
+out:
+       __sync_fetch_and_sub(&entered, 1);
+       return rval;
+}
+
 int 
 pthread_attr_destroy (pthread_attr_t *attr)
 {

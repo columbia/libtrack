@@ -2,3 +2,5 @@ droid
 cscope*
 *.pyc
 .*.swp
+*.so
+tags

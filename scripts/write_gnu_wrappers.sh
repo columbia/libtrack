@@ -16,6 +16,7 @@ PROC="/home/vatlidak/repos/systrace/arch/x86/src/processes.c"
 PTHREADS="/home/vatlidak/repos/systrace/arch/x86/src/pthreads.c"
 TERM="/home/vatlidak/repos/systrace/arch/x86/src/terminals.c"
 TIME="/home/vatlidak/repos/systrace/arch/x86/src/time.c"
+USERS="/home/vatlidak/repos/systrace/arch/x86/src/users.c"
 MISC="/home/vatlidak/repos/systrace/arch/x86/src/misc.c"
 #
 if [ ! -f $HEADER ]; then
@@ -144,11 +145,11 @@ cat ${PROC} >> temp.c
 cat ${PTHREADS} >> temp.c
 cat ${TERM} >> temp.c
 cat ${TIME} >> temp.c
+cat ${USERS} >> temp.c
 ##
 #cat ${MISC} >> temp.c
 #cat ${ALGO} >> temp.c
 #cat ${ARGS} >> temp.c
 #cat ${GNU_EXTENSIONS} >> temp.c
-
 make
 rm temp.c

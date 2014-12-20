@@ -1,6 +1,34 @@
 /*
  * Processes & Signals
  */
+sighandler_t
+signal(int signum, sighandler_t handler)
+{
+       struct timespec start, end;
+       static sighandler_t  (*fn)(int , sighandler_t );
+       __sync_fetch_and_add(&entered, 1);
+       if (fn == NULL)
+           *(void **)(&fn) = dlsym(RTLD_NEXT, "signal");
+       if (fn == NULL){
+            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "signal");
+            goto out;
+       }
+       sighandler_t  rval;
+       if (entered == 1) {
+               _backtrace();
+               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+               rval = fn(signum, handler);
+               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+               _timespec_sub(&end, &start);
+               _logtime("signal", end);
+       } else {
+               rval = fn(signum, handler);
+       }
+out:
+       __sync_fetch_and_sub(&entered, 1);
+       return rval;
+}
+
 sighandler_t 
 sigset (int sig, sighandler_t disp)
 {
@@ -23,34 +51,6 @@ sigset (int sig, sighandler_t disp)
                _logtime("sigset", end);
        } else {
                rval = fn(sig, disp);
-       }
-out:
-       __sync_fetch_and_sub(&entered, 1);
-       return rval;
-}
-
-int 
-waitid (idtype_t idtype, id_t id, siginfo_t *infop, int options)
-{
-       struct timespec start, end;
-       static int  (*fn)(idtype_t , id_t , siginfo_t *, int );
-       __sync_fetch_and_add(&entered, 1);
-       if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "waitid");
-       if (fn == NULL){
-            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "waitid");
-            goto out;
-       }
-       int  rval;
-       if (entered == 1) {
-               _backtrace();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-               rval = fn(idtype, id, infop, options);
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-               _timespec_sub(&end, &start);
-               _logtime("waitid", end);
-       } else {
-               rval = fn(idtype, id, infop, options);
        }
 out:
        __sync_fetch_and_sub(&entered, 1);
@@ -1060,6 +1060,7 @@ out:
        __sync_fetch_and_sub(&entered, 1);
       return rval;
 }
+
 
 int 
 setregid (gid_t rgid, gid_t egid)

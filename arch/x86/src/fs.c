@@ -953,6 +953,34 @@ out:
 }
 
 int 
+dup2 (int oldfd, int newfd)
+{
+       struct timespec start, end;
+       static int  (*fn)(int, int );
+       __sync_fetch_and_add(&entered, 1);
+       if (fn == NULL)
+           *(void **)(&fn) = dlsym(RTLD_NEXT, "dup2");
+       if (fn == NULL){
+            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "dup2");
+            goto out;
+       }
+       int  rval;
+       if (entered == 1) {
+               _backtrace();
+               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+               rval = fn(oldfd, newfd);
+               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+               _timespec_sub(&end, &start);
+               _logtime("dup2", end);
+       } else {
+               rval = fn(oldfd, newfd);
+       }
+out:
+       __sync_fetch_and_sub(&entered, 1);
+       return rval;
+}
+
+int 
 dup (int oldfd)
 {
        struct timespec start, end;
@@ -1758,34 +1786,6 @@ fseeko (FILE *stream, off_t offset, int whence)
                _logtime("fseeko", end);
        } else {
                rval = fn(stream, offset, whence);
-       }
-out:
-       __sync_fetch_and_sub(&entered, 1);
-       return rval;
-}
-
-int 
-fstatat (int dirfd, const char *pathname, struct stat *buf, int flags)
-{
-       struct timespec start, end;
-       static int  (*fn)(int , const char *, struct stat *, int );
-       __sync_fetch_and_add(&entered, 1);
-       if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "fstatat");
-       if (fn == NULL){
-            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "fstatat");
-            goto out;
-       }
-       int  rval;
-       if (entered == 1) {
-               _backtrace();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-               rval = fn(dirfd, pathname, buf, flags);
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-               _timespec_sub(&end, &start);
-               _logtime("fstatat", end);
-       } else {
-               rval = fn(dirfd, pathname, buf, flags);
        }
 out:
        __sync_fetch_and_sub(&entered, 1);
