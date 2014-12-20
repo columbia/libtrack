@@ -400,7 +400,9 @@ recv (int sockfd, void *buf, size_t len, int flags)
                rval = fn(sockfd, buf, len, flags);
                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
                _timespec_sub(&end, &start);
-               _logtime("recv", end);
+		char name[] = "recv_?";
+		name[5] = fd_type(sockfd);
+               _logtime(name, end);
        } else {
                rval = fn(sockfd, buf, len, flags);
        }
@@ -456,7 +458,9 @@ send (int sockfd, const void *buf, size_t len, int flags)
                rval = fn(sockfd, buf, len, flags);
                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
                _timespec_sub(&end, &start);
-               _logtime("send", end);
+		char name[] = "send_?";
+		name[5] = fd_type(sockfd); 
+               _logtime(name, end);
        } else {
                rval = fn(sockfd, buf, len, flags);
        }
