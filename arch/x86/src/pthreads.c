@@ -1,32 +1,269 @@
 /*
  * Pthreads
+ *
+ * Note that unlike bionic libc, in glibc pthreads
+ * live in another shared library and preloading
+ * glibc in the GOT of a process has some implications.
+ *
+ * Specifically, dlsym used the default calloc which
+ * ends up being recursively traced. To solve this,
+ * we preload pthread symbols from glibc.so which
+ * will end up using our modified calloc version that
+ * is recursion free.
+ *
+ * Unfortunatelly, some pthread functions are not exposed
+ * via libc and may cause problemms. If this is the case
+ * in the future we will stop tracing them.
  */
-pthread_t
-pthread_self(void)
+
+/*
+ * Invoked too often to trace
+ *
+ * We don't trace them in Android either.
+ */
+//int
+//pthread_mutex_lock(pthread_mutex_t *mutex)
+//{
+//       static int  (*fn)(pthread_mutex_t *);
+//       __sync_fetch_and_add(&entered, 1);
+//       if (fn == NULL)
+//           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_mutex_lock");
+//       if (fn == NULL){
+//            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_mutex_lock");
+//            goto out;
+//       }
+//       int  rval;
+//       if (entered == 1)
+//               _backtrace();
+//out:
+//       __sync_fetch_and_sub(&entered, 1);
+//       return fn(mutex);
+//}
+//
+//int
+//pthread_mutex_unlock(pthread_mutex_t *mutex)
+//{
+//       static int  (*fn)(pthread_mutex_t *);
+//       __sync_fetch_and_add(&entered, 1);
+//       if (fn == NULL)
+//           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_mutex_unlock");
+//       if (fn == NULL){
+//            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_mutex_unlock");
+//            goto out;
+//       }
+//       int  rval;
+//       if (entered == 1)
+//               _backtrace();
+//out:
+//       __sync_fetch_and_sub(&entered, 1);
+//       return fn(mutex);
+//}
+//pthread_t
+//pthread_self(void)
+//{
+//       struct timespec start, end;
+//       static int  (*fn)(void);
+//       __sync_fetch_and_add(&entered, 1);
+//       if (fn == NULL)
+//           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_self");
+//       if (fn == NULL){
+//            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_self");
+//            goto out;
+//       }
+//       pthread_t  rval;
+//       if (entered == 1) {
+//               _backtrace();
+//               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+//               rval = fn();
+//               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+//               _timespec_sub(&end, &start);
+//               _logtime("pthread_self", end);
+//       } else {
+//               rval = fn();
+//       }
+//out:
+//       __sync_fetch_and_sub(&entered, 1);
+//       return rval;
+//}
+
+int
+pthread_cond_signal(pthread_cond_t *cond)
 {
-       struct timespec start, end;
-       static int  (*fn)(void);
+	struct timespec start, end;
+       static int  (*fn)(pthread_cond_t *);
        __sync_fetch_and_add(&entered, 1);
        if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "pthread_self");
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_cond_signal");
        if (fn == NULL){
-            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_self");
+            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_cond_signal");
             goto out;
        }
-       pthread_t  rval;
+       int rval;
        if (entered == 1) {
-               _backtrace();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
-               rval = fn();
-               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-               _timespec_sub(&end, &start);
-               _logtime("pthread_attr_destroy", end);
+		_backtrace();
+		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+		rval = fn(cond);
+		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+		_timespec_sub(&end, &start);
+               _logtime("pthread_cond_signal", end);
        } else {
-               rval = fn();
+               rval = fn(cond);
        }
 out:
        __sync_fetch_and_sub(&entered, 1);
        return rval;
+}
+
+int
+pthread_cond_init(pthread_cond_t *cond, const pthread_condattr_t *attr)
+{
+	struct timespec start, end;
+       static int  (*fn)(pthread_cond_t *, const pthread_condattr_t *);
+       __sync_fetch_and_add(&entered, 1);
+       if (fn == NULL)
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_cond_init");
+       if (fn == NULL){
+            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_cond_init");
+            goto out;
+       }
+       int  rval;
+       if (entered == 1) {
+               _backtrace();
+               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+               rval = fn(cond, attr);
+               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+               _timespec_sub(&end, &start);
+               _logtime("pthread_cond_init", end);
+       } else {
+               rval = fn(cond, attr);
+       }
+out:
+       __sync_fetch_and_sub(&entered, 1);
+       return rval;
+}
+
+int
+pthread_cond_destroy(pthread_cond_t *cond)
+{
+	struct timespec start, end;
+       static int  (*fn)(pthread_cond_t *);
+       __sync_fetch_and_add(&entered, 1);
+       if (fn == NULL)
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_cond_destroy");
+       if (fn == NULL){
+            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_cond_destroy");
+            goto out;
+       }
+       int  rval;
+       if (entered == 1) {
+               _backtrace();
+               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+               rval = fn(cond);
+               clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+               _timespec_sub(&end, &start);
+               _logtime("pthread_cond_destroy", end);
+       } else {
+		rval = fn(cond);
+       }
+out:
+       __sync_fetch_and_sub(&entered, 1);
+       return rval;
+}
+
+int
+pthread_cond_broadcast(pthread_cond_t *cond)
+{
+	struct timespec start, end;
+       static int  (*fn)(pthread_cond_t *);
+       __sync_fetch_and_add(&entered, 1);
+       if (fn == NULL)
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_cond_broadcast");
+       if (fn == NULL){
+            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_cond_broadcast");
+            goto out;
+       }
+       int rval;
+       if (entered == 1) {
+            _backtrace();
+	    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+            rval = fn(cond);
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+            _timespec_sub(&end, &start);
+            _logtime("pthread_cond_broadcast", end);
+	} else {
+		rval = fn(cond);
+        }
+out:
+       __sync_fetch_and_sub(&entered, 1);
+       return rval;
+}
+
+int
+pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex)
+{
+       static int  (*fn)(pthread_cond_t *, pthread_mutex_t *);
+       __sync_fetch_and_add(&entered, 1);
+       if (fn == NULL)
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_cond_wait");
+       if (fn == NULL){
+            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_cond_wait");
+            goto out;
+       }
+       int  rval;
+       if (entered == 1)
+               _backtrace();
+out:
+       __sync_fetch_and_sub(&entered, 1);
+       return fn(cond, mutex);
+}
+
+int
+pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const struct timespec *abstime)
+{
+       static int  (*fn)(pthread_cond_t *, pthread_mutex_t *, const struct timespec *);
+       __sync_fetch_and_add(&entered, 1);
+       if (fn == NULL)
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_cond_timedwait");
+       if (fn == NULL){
+            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_cond_timedwait");
+            goto out;
+       }
+       if (entered == 1)
+               _backtrace();
+out:
+       __sync_fetch_and_sub(&entered, 1);
+       return fn(cond, mutex, abstime);
+}
+
+int
+pthread_create (pthread_t *thread, const pthread_attr_t *attr, void *(*start_routine) (void *), void *arg)
+{
+        struct timespec start, end;
+        static  int (*fn)(pthread_t *, const pthread_attr_t *,
+                  void *(*s)(void *), void *);
+
+        __sync_fetch_and_add(&entered, 1);
+        if (fn == NULL)
+            *(void **)(&fn) = dlsym(RTLD_NEXT, "pthread_create");
+        if (fn == NULL) {
+            fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n",
+                    "pthread_create");
+            goto out;
+        }
+	int rval;
+        if (entered == 1) {
+            _backtrace();
+	    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+            rval = fn(thread, attr, start_routine, arg);
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+            _timespec_sub(&end, &start);
+            _logtime("pthread_create", end);
+	} else {
+            rval = fn(thread, attr, start_routine, arg);
+	}
+out:
+        __sync_fetch_and_sub(&entered, 1);
+        return rval;
 }
 
 int 
@@ -36,7 +273,7 @@ pthread_attr_destroy (pthread_attr_t *attr)
        static int  (*fn)(pthread_attr_t *);
        __sync_fetch_and_add(&entered, 1);
        if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "pthread_attr_destroy");
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_attr_destroy");
        if (fn == NULL){
             fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_attr_destroy");
             goto out;
@@ -64,7 +301,7 @@ pthread_attr_getdetachstate (pthread_attr_t *attr, int *detachstate)
        static int  (*fn)(pthread_attr_t *, int *);
        __sync_fetch_and_add(&entered, 1);
        if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "pthread_attr_getdetachstate");
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_attr_getdetachstate");
        if (fn == NULL){
             fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_attr_getdetachstate");
             goto out;
@@ -120,7 +357,7 @@ pthread_attr_getinheritsched (pthread_attr_t *attr, int inheritsched)
        static int  (*fn)(pthread_attr_t *, int );
        __sync_fetch_and_add(&entered, 1);
        if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "pthread_attr_getinheritsched");
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_attr_getinheritsched");
        if (fn == NULL){
             fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_attr_getinheritsched");
             goto out;
@@ -148,7 +385,7 @@ pthread_attr_getschedparam (pthread_attr_t *attr, struct sched_param *param)
        static int  (*fn)(pthread_attr_t *, struct sched_param *);
        __sync_fetch_and_add(&entered, 1);
        if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "pthread_attr_getschedparam");
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_attr_getschedparam");
        if (fn == NULL){
             fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_attr_getschedparam");
             goto out;
@@ -176,7 +413,7 @@ pthread_attr_getschedpolicy (pthread_attr_t *attr, int *policy)
        static int  (*fn)(pthread_attr_t *, int *);
        __sync_fetch_and_add(&entered, 1);
        if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "pthread_attr_getschedpolicy");
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_attr_getschedpolicy");
        if (fn == NULL){
             fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_attr_getschedpolicy");
             goto out;
@@ -204,7 +441,7 @@ pthread_attr_getscope (pthread_attr_t *attr, int *scope)
        static int  (*fn)(pthread_attr_t *, int *);
        __sync_fetch_and_add(&entered, 1);
        if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "pthread_attr_getscope");
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_attr_getscope");
        if (fn == NULL){
             fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_attr_getscope");
             goto out;
@@ -288,7 +525,7 @@ pthread_attr_init (pthread_attr_t *attr)
        static int  (*fn)(pthread_attr_t *);
        __sync_fetch_and_add(&entered, 1);
        if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "pthread_attr_init");
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_attr_init");
        if (fn == NULL){
             fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_attr_init");
             goto out;
@@ -316,7 +553,7 @@ pthread_attr_setdetachstate (pthread_attr_t *attr, int detachstate)
        static int  (*fn)(pthread_attr_t *, int );
        __sync_fetch_and_add(&entered, 1);
        if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "pthread_attr_setdetachstate");
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_attr_setdetachstate");
        if (fn == NULL){
             fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_attr_setdetachstate");
             goto out;
@@ -372,7 +609,7 @@ pthread_attr_setinheritsched (pthread_attr_t *attr, int *inheritsched)
        static int  (*fn)(pthread_attr_t *, int *);
        __sync_fetch_and_add(&entered, 1);
        if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "pthread_attr_setinheritsched");
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_attr_setinheritsched");
        if (fn == NULL){
             fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_attr_setinheritsched");
             goto out;
@@ -400,7 +637,7 @@ pthread_attr_setschedparam (pthread_attr_t *attr, const struct sched_param *para
        static int  (*fn)(pthread_attr_t *, const struct sched_param *);
        __sync_fetch_and_add(&entered, 1);
        if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "pthread_attr_setschedparam");
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_attr_setschedparam");
        if (fn == NULL){
             fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_attr_setschedparam");
             goto out;
@@ -428,7 +665,7 @@ pthread_attr_setschedpolicy (pthread_attr_t *attr, int policy)
        static int  (*fn)(pthread_attr_t *, int );
        __sync_fetch_and_add(&entered, 1);
        if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "pthread_attr_setschedpolicy");
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_attr_setschedpolicy");
        if (fn == NULL){
             fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_attr_setschedpolicy");
             goto out;
@@ -456,7 +693,7 @@ pthread_attr_setscope (pthread_attr_t *attr, int scope)
        static int  (*fn)(pthread_attr_t *, int );
        __sync_fetch_and_add(&entered, 1);
        if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "pthread_attr_setscope");
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_attr_setscope");
        if (fn == NULL){
             fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_attr_setscope");
             goto out;
@@ -596,7 +833,7 @@ pthread_equal (pthread_t t1, pthread_t t2)
        static int  (*fn)(pthread_t , pthread_t );
        __sync_fetch_and_add(&entered, 1);
        if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "pthread_equal");
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_equal");
        if (fn == NULL){
             fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_equal");
             goto out;
@@ -680,7 +917,7 @@ pthread_getschedparam (pthread_t thread, int *policy,  const struct sched_param 
        static int  (*fn)(pthread_t , int *,  const struct sched_param *);
        __sync_fetch_and_add(&entered, 1);
        if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "pthread_getschedparam");
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_getschedparam");
        if (fn == NULL){
             fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_getschedparam");
             goto out;
@@ -764,7 +1001,7 @@ pthread_setcancelstate (int state, int *oldstate)
        static int  (*fn)(int , int *);
        __sync_fetch_and_add(&entered, 1);
        if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "pthread_setcancelstate");
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_setcancelstate");
        if (fn == NULL){
             fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_setcancelstate");
             goto out;
@@ -792,7 +1029,7 @@ pthread_setcanceltype (int type, int *oldtype)
        static int  (*fn)(int , int *);
        __sync_fetch_and_add(&entered, 1);
        if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "pthread_setcanceltype");
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_setcanceltype");
        if (fn == NULL){
             fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_setcanceltype");
             goto out;
@@ -848,7 +1085,7 @@ pthread_setschedparam (pthread_t thread, int policy, struct sched_param *param)
        static int  (*fn)(pthread_t , int , struct sched_param *);
        __sync_fetch_and_add(&entered, 1);
        if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "pthread_setschedparam");
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_setschedparam");
        if (fn == NULL){
             fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_setschedparam");
             goto out;
@@ -958,7 +1195,7 @@ pthread_exit (void *retval)
        static void  (*fn)(void *);
        __sync_fetch_and_add(&entered, 1);
        if (fn == NULL)
-           *(void **)(&fn) = dlsym(RTLD_NEXT, "pthread_exit");
+           *(void **)(&fn) = dlsym(dlopen("/lib/x86_64-linux-gnu/libc.so.6",RTLD_LAZY), "pthread_exit");
        if (fn == NULL){
             fprintf(stderr, "dlsym: Error while loading symbol: <%s>\n", "pthread_exit");
             goto out;
