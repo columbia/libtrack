@@ -344,7 +344,7 @@ select (int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct t
                rval = fn(nfds, readfds, writefds, exceptfds, timeout);
                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
                _timespec_sub(&end, &start);
-               _logtime("select", end);
+	       _logtime("select", end);
        } else {
                rval = fn(nfds, readfds, writefds, exceptfds, timeout);
        }
@@ -372,7 +372,9 @@ recvfrom (int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_add
                rval = fn(sockfd, buf, len, flags, src_addr, addrlen);
                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
                _timespec_sub(&end, &start);
-               _logtime("recvfrom", end);
+               char name[] = "recvfrom_?";
+               name[9] = fd_type(sockfd);
+	       _logtime(name, end);
        } else {
                rval = fn(sockfd, buf, len, flags, src_addr, addrlen);
        }
@@ -429,8 +431,10 @@ recvmsg (int sockfd, struct msghdr *msg, int flags)
                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
                rval = fn(sockfd, msg, flags);
                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+               char name[] = "recvmsg_?";
+               name[8] = fd_type(sockfd);
                _timespec_sub(&end, &start);
-               _logtime("recvmsg", end);
+               _logtime(name, end);
        } else {
                rval = fn(sockfd, msg, flags);
        }
@@ -487,8 +491,10 @@ sendmsg (int sockfd, const struct msghdr *msg, int flags)
                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
                rval = fn(sockfd, msg, flags);
                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+               char name[] = "sendmsg_?";
+               name[8] = fd_type(sockfd);
                _timespec_sub(&end, &start);
-               _logtime("sendmsg", end);
+               _logtime(name, end);
        } else {
                rval = fn(sockfd, msg, flags);
        }
@@ -516,7 +522,9 @@ sendto (int sockfd, const void *buf, size_t len, int flags, const struct sockadd
                rval = fn(sockfd, buf, len, flags, dest_addr, addrlen);
                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
                _timespec_sub(&end, &start);
-               _logtime("sendto", end);
+               char name[] = "sendto_?";
+               name[7] = fd_type(sockfd);
+               _logtime(name, end);
        } else {
                rval = fn(sockfd, buf, len, flags, dest_addr, addrlen);
        }
