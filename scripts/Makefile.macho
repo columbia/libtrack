@@ -1,0 +1,137 @@
+# Makefile for Columbia systrace iOS wrapper library
+#
+# Makefile.inc should define:
+#     ARCH_NAME = ...
+#     SRC = ...
+#     INCLUDES = ...
+# It can optionally define:
+#     V = (1 or 0)
+#     SDKROOT = ...
+#     CFLAGS= ...
+#     LDFLAGS = ...
+#     OBJROOT = ...
+include Makefile.inc
+
+V ?= 0
+INCLUDES ?= arch/$(ARCH_NAME)/include
+
+SDKROOT ?= iphoneos
+OBJDIR ?= $(shell /bin/pwd)/obj
+
+RELEASE_OBJDIR = $(OBJDIR)/release
+DEBUG_OBJDIR = $(OBJDIR)/debug
+TGT = $(TARGET).dylib
+
+ifeq ($(V),1)
+	Q=
+else
+	Q=@
+endif
+
+CC := $(shell xcrun -sdk "$(SDKROOT)" -find clang)
+STRIP := $(shell xcrun -sdk "$(SDKROOT)" -find strip)
+NM := $(shell xcrun -sdk "$(SDKROOT)" -find nm)
+
+ARCHS := $(ARCH_NAME)
+SDKROOTPATH := $(shell xcrun -sdk "$(SDKROOT)" -show-sdk-path)
+ifeq ($(SDKROOTPATH),)
+    $(error "Unable to find $(SDKROOT) on host. Exiting")
+endif
+
+CFLAGS += -I. -isysroot $(SDKROOTPATH) $(INCLUDES:%=-I%) $(patsubst %, -arch %,$(ARCHS)) -Wall
+OPTFLAGS_RELEASE = -g -O3 -DLINKER_DEBUG=0
+OPTFLAGS_DEBUG   = -g -O0 -DLINKER_DEBUG=1 -DTRACE_BRIDGE_CALLS
+
+LDFLAGS += -dynamiclib -isysroot $(SDKROOTPATH) \
+           $(patsubst %, -arch %,$(ARCHS)) \
+           -mstackrealign -umbrella System -single_module
+LDFLAGS_DEBUG = $(LDFLAGS_SHARED) $(LDFLAGS)
+LDFLAGS_RELEASE = $(LDFLAGS_SHARED) $(LDFLAGS)
+
+HEADERS = $(foreach dir,$(INCLUDES),\
+	            $(shell find "$(dir)" -type f -name *.h | tr '\n' ' '))
+
+default: debug
+
+%.S.o: CFLAGS += -D__ASSEMBLY__
+
+debug: BASIC_FLAGS += $(OPTFLAGS_DEBUG) $(CFLAGS)
+debug: DEBUG_OBJ  = $(patsubst %.c,$(DEBUG_OBJDIR)/%.c.o,$(filter %.c, $(SRC)))
+debug: DEBUG_OBJ += $(patsubst %.cpp,$(DEBUG_OBJDIR)/%.cxx.o,$(filter %.cpp, $(SRC)))
+debug: DEBUG_OBJ += $(patsubst %.S,$(DEBUG_OBJDIR)/%.S.o,$(filter %.S, $(SRC)))
+debug: DEBUG_OBJ += $(patsubst %.m,$(DEBUG_OBJDIR)/%.m.o,$(filter %.m, $(SRC)))
+debug: $(DEBUG_OBJDIR)/$(TGT).DEBUG
+
+release: BASIC_FLAGS += $(OPTFLAGS_RELEASE) $(CFLAGS)
+release: RELEASE_OBJ  = $(patsubst %.c,$(RELEASE_OBJDIR)/%.c.o,$(filter %.c, $(SRC)))
+release: RELEASE_OBJ += $(patsubst %.cpp,$(RELEASE_OBJDIR)/%.cxx.o,$(filter %.cpp, $(SRC)))
+release: RELEASE_OBJ += $(patsubst %.S,$(RELEASE_OBJDIR)/%.S.o,$(filter %.S, $(SRC)))
+release: RELEASE_OBJ += $(patsubst %.m,$(RELEASE_OBJDIR)/%.m.o,$(filter %.m, $(SRC)))
+release: $(DEBUG_OBJDIR)/$(TGT).RELEASE
+
+# prevent make from deleting my objects
+.SECONDARY: $(DEBUG_OBJ) $(RELEASE_OBJ)
+
+%/.exists:
+	@if [ ! -d "$*" ]; then mkdir -p "$*"; fi
+	@touch "$*/.exists"
+
+$(DEBUG_OBJDIR)/%.S.o $(RELEASE_OBJDIR)/%.S.o: %.S
+	@echo "[ASM ] $<"
+	@mkdir -p $(@D) > /dev/null
+	$(Q)$(CC) $(BASIC_FLAGS) $(CFLAGS) -c -o $@ $<
+
+$(DEBUG_OBJDIR)/%.c.o $(RELEASE_OBJDIR)/%.c.o: %.c
+	@echo "[CC  ] $<"
+	@mkdir -p $(@D) > /dev/null
+	$(Q)$(CC) $(BASIC_FLAGS) $(CFLAGS) -c -o $@ $<
+
+$(DEBUG_OBJDIR)/%.cxx.o $(RELEASE_OBJDIR)/%.cxx.o: %.cpp
+	@echo "[CXX ] $<"
+	@mkdir -p $(@D) > /dev/null
+	$(Q)$(CC) $(BASIC_FLAGS) $(CXXFLAGS) -c -o $@ $<
+
+$(DEBUG_OBJDIR)/%.m.o $(RELEASE_OBJDIR)/%.m.o: %.m
+	@echo "[OBJC] $<"
+	@mkdir -p $(@D) > /dev/null
+	$(Q)$(CC) $(BASIC_FLAGS) $(OBJC_FLAGS) -c -o $@ $<
+
+# second expansion here allows me to expand variables in the dependencies
+# which would otherwise not be expanded properly
+.SECONDEXPANSION:
+$(DEBUG_OBJDIR)/$(TGT).% $(RELEASE_OBJDIR)/$(TGT).%: $$($$*_OBJDIR)/.exists $$($$*_OBJ) Makefile
+	@echo "[LINK][$*] $(TGT)"
+	$(Q)$(CC) $(CFLAGS) $(LDFLAGS_$*) -o $@ $($*_OBJ)
+	@if [ ! -z "$(EXPORT_SYMBOLS)" ]; then \
+		echo "[STRIP] $@"; \
+		$(NM) $@ | cut -d ' ' -f 3 | \
+			grep $(EXPORT_SYMBOLS) > $($*_OBJDIR)/$(TGT).syms; \
+		$(STRIP) -arch all -s $($*_OBJDIR)/$(TGT).syms \
+			 -u $@ || rm $@; \
+	fi
+	@cp -f $@ $(TGT)
+
+package: package.DEBUG
+package.DEBUG: DSTDIR  := $(DEBUG_OBJDIR)/dst
+package.DEBUG: DSTPATH := $(DEBUG_OBJDIR)/dst/$(shell dirname $(TGT_PATH))
+package.DEBUG: DSTNAME := $(shell basename $(TGT_PATH))
+package.DEBUG: _STNAME := $(shell basename $(TGT__ATH))
+package.DEBUG: DSTREALNAME := real_$(shell basename $(TGT_PATH))
+package.DEBUG: DSTREALLINK := $(shell basename $(TGT_PATH) | sed 's/libsystem/libsystem_real/')
+
+package.RELEASE: DSTDIR  := $(RELEASE_OBJDIR)/dst
+package.RELEASE: DSTPATH := $(RELEASE_OBJDIR)/dst/$(shell dirname $(TGT_PATH))
+package.RELEASE: DSTNAME := $(shell basename $(TGT_PATH))
+package.RELEASE: _STNAME := $(shell basename $(TGT__ATH))
+package.RELEASE: DSTREALNAME := real_$(shell basename $(TGT_PATH))
+package.RELEASE: DSTREALLINK := $(shell basename $(TGT_PATH) | sed 's/libsystem/libsystem_real/')
+
+.SECONDEXPANSION:
+package.%: $$($$*_OBJDIR)/$(TGT).$$*
+	@echo "[PKG ][$*] $(TGT).cpgz"
+	$(Q)mkdir -p $(DSTPATH)
+	$(Q)cp $($*_OBJDIR)/$(TGT).$* $(DSTPATH)/$(DSTNAME)
+	$(Q)cp $(DSTREALNAME) $(DSTPATH)/$(_STNAME)
+	$(Q)pushd $(DSTPATH); ln -s $(_STNAME) $(DSTREALLINK)
+	sudo chown -R root:wheel $(DSTDIR)
+	$(Q)ditto -cz $(DSTDIR) $($*_OBJDIR)/$(TGT).cpgz

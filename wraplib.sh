@@ -18,6 +18,7 @@ TOOL_PFX=${CROSS_COMPILE:-arm-eabi-}
 
 FILE=`which file`
 OTOOL=`which otool`
+LIPO=`which lipo`
 COMM=`which comm`
 SED=`which gsed`
 ELF_OBJDUMP=`which ${TOOL_PFX}objdump`
@@ -40,6 +41,7 @@ WRAPPRIO=2
 LIB=
 LIBDIR=
 LIBTYPE=
+_IBPATH=
 LIBPATH=
 OUTDIR=.
 USE_NDK=
@@ -51,17 +53,17 @@ LIBPFX=real_
 function usage() {
 	echo -e "Usage: $0 --lib path/to/library "
 	echo -e "                          [--wrap-all]"
-	echo -e "                          [--arch {arm|armv7}]"
+	echo -e "                          [--arch {arm|armv7|armv7s|arm64|x86}]"
 	echo -e "                          [--type {elf|macho}]"
 	echo -e "                          [--out path/to/output/dir]"
 	echo -e "                          [--use-ndk]"
 	echo -e ""
 	echo -e "\t--wrap-all                      Wrap (trace) all functions in the library"
-	echo -e "\t--wrap-specific symfile          Wrap symbols specified in symfile"
+	echo -e "\t--wrap-specific symfile         Wrap symbols specified in symfile"
 	echo -e "\t--wrap-prio [1|2]               1 = \"always wrap\" functions take priority"
 	echo -e "\t                                2 = \"never wrap\" functions take priority"
 	echo -e "\t                                (default: 2)"
-	echo -e "\t--arch {arm|armv7|x86}        Architecture for syscall wrappers"
+	echo -e "\t--arch {arm|armv7|armv7s|arm64|x86}    Architecture for syscall wrappers"
 	echo -e ""
 	echo -e "\t--lib path/to/library           Library (or directory of libraries) to search for syscalls"
 	echo -e ""
@@ -109,8 +111,8 @@ while [[ ! -z "$1" ]]; do
 			shift
 			;;
         --arch )
-			if [ "$2" != "arm"  -a "$2" != "armv7"  -a "$2" != "x86" ]; then
-				echo "E: Architectures other than 'arm', 'arv7', and 'x86' are not yet supported!"
+			if [ "$2" != "arm"  -a "$2" != "armv7" -a "$2" != "armv7s" -a "$2" != "arm64" -a "$2" != "x86" ]; then
+				echo "E: Architectures other than 'arm', 'armv7', 'armv7s', 'arm64', and 'x86' are not yet supported!"
 				usage
 			fi
 			ARCH="$2"
@@ -193,6 +195,7 @@ fi
 #
 if [ "$LIBTYPE" = "macho" ]; then
 	STRIP=`which strip`
+	INSTALL_NM_TOOL=`which install_name_tool`
 	if [ -z "$OTOOL" -o ! -x "$OTOOL" ]; then
 		echo "E: Can't find otool in your path - have you installed the command-line Developer tools?"
 		exit -1
@@ -208,6 +211,7 @@ if [ "$LIBTYPE" = "macho" ]; then
 
 elif [ "$LIBTYPE" = "elf" ]; then
 	STRIP="${CDIR}/elfmod/elfmod.py"
+	INSTALL_NM_TOOL=
 	if [ -z "$ELF_OBJDUMP" -o ! -x "$ELF_OBJDUMP" ]; then
 		echo "E: Can't find ${TOOL_PFX}objdump in your path."
 		exit -1
@@ -243,7 +247,7 @@ function extract_code() {
 		${ELF_OBJDUMP} -d "$in" > "$out"
     elif [ "$LIBTYPE" = "macho" ]; then
         local libarch="-arch $ARCH"
-        ${OTOOL} $libarch -tV "$in" > "$out"
+        ${OTOOL} $libarch -tvV "$in" > "$out"
 	else
 		echo "E: unsupported lib type:'$LIBTYPE'"
 		exit -1
@@ -373,7 +377,7 @@ function write_sym() {
 		__line_len=$(($__line_len + 2))
 		for sym in "${syms[@]}"; do
 			if [ "${sym}" != "${_fcn}" ]; then
-				echo "FUNC_ALIAS(${sym})" >> "${_dst}"
+				echo "FUNC_ALIAS(${sym},${_fcn})" >> "${_dst}"
 			fi
 		done
 		echo "${_type}_END(${_lib}, ${_fcn})" >> "${_dst}"
@@ -409,16 +413,42 @@ function __setup_wrapped_lib() {
         -DANDROID_SMP=1 $linebreak
         -fno-stack-protector $linebreak
         -Werror $linebreak
-        -DLIBNAME=${LIB} -D_IBNAM_=$(basename ${LIBPATH})
+        -DLIBNAME=${LIB} -D_IBNAM_=$(basename ${_IBPATH}) ${linebreak}
+        -D_IBPATH=\\"${_IBPATH}\\" ${linebreak}
+        -DLIBPATH=\\"${LIBPATH}\\"
 __EOF
 )
-	local src_files=$(cat <<-__EOF
+	if [ "${LIBTYPE}" = "macho" ]; then
+		local src_files=$(cat <<-__EOF
+$linebreak
+        $(basename "$asm") $linebreak
+$(ls -1 "${CDIR}/src" | awk '{print "        " $0 " \\"}')
+__EOF
+)
+        if [ "${LIB}" = "libsystem_kernel.dylib" ]; then
+            c_flags=$(cat <<-__EOF
+$c_flags $linebreak
+        -D_LIBSYSTEM_KERNEL=1
+__EOF
+)
+        fi
+        if [ "${LIB}" = "libsystem_c.dylib" ]; then
+            c_flags=$(cat <<-__EOF
+$c_flags $linebreak
+        -D_LIBC=1
+__EOF
+)
+        fi
+    else # ! MachO
+        local src_files=$(cat <<-__EOF
         platform/${ARCH}/crtbegin_so.c $linebreak
         $(basename "$asm") $linebreak
-$(ls -1 "${CDIR}/src" | awk '{print "\t\t" $0 " \\"}')
+$(ls -1 "${CDIR}/src" | awk '{print "        " $0 " \\"}')
         platform/${ARCH}/\$(TARGET_ARCH)/crtend_so.S
 __EOF
 )
+	fi # LIBTYPE != macho
+
 	if [ "${ARCH}" = "arm" ]; then
 		if [ "${LIB}" = "libc.so" ]; then
 			src_files=$(cat <<-__EOF
@@ -437,11 +467,17 @@ __EOF
 )
 		fi
 	fi
-	if [ "${ARCH}" = "arm" -o "${ARCH}" = "armv7" ]; then
+	if [ "${ARCH}" = "arm" -o "${ARCH:0:5}" = "armv7" ]; then
 		ic_flags=$(cat <<-__EOF
 $c_flags $linebreak
         -DHAVE_SIGHANDLER $linebreak
         -marm -mno-thumb-interwork
+__EOF
+)
+	elif [ "${ARCH}" = "arm64" ]; then
+		ic_flags=$(cat <<-__EOF
+$c_flags $linebreak
+        -DHAVE_SIGHANDLER
 __EOF
 )
 	fi
@@ -461,10 +497,17 @@ $src_files $linebreak
 __EOF
 )
 	fi
+	if [ -f "${CDIR}/platform/${ARCH}/syscalls.S" ]; then
+		src_files=$(cat <<-__EOF
+$src_files $linebreak
+        platform/${ARCH}/syscalls.S
+__EOF
+)
+	fi
 
 	# We have a special wrapper return handling function
 	# on ARM Android that we hook in here
-	if [ "${ARCH}" = "arm" ]; then
+	if [ "${ARCH}" = "arm" -o "${ARCH:0:5}" = "armv7" -o "${ARCH}" = "arm64" ]; then
 		extra_S_hdr="#define WRAP_RETURN_FUNC wrapped_return"
 	fi
 
@@ -482,7 +525,7 @@ __EOF
 ${extra_S_hdr}
 #include <asm/wrap_start.h>
 
-WRAP_LIB(${LIB}, ${LIBPATH})
+WRAP_LIB(${LIB}, ${_IBPATH})
 
 __EOF
 )
@@ -512,8 +555,25 @@ LOCAL_SYSTEM_SHARED_LIBRARIES :=
 __EOF
 )
 
+	MACHO_MK=$(cat -<<__EOF
+TARGET = ${LIB%.dylib}
+ARCH_NAME = ${ARCH}
+INCLUDES = platform/${ARCH}/include${linebreak}
+           arch/${ARCH}/include
+LDFLAGS = -nostdlib ${linebreak}
+          -compatibility_version 1.0.0 ${linebreak}
+          -current_version 1.0.0 ${linebreak}
+          -install_name ${LIBPATH}
+CFLAGS = ${c_flags}
+SRC = ${src_files}
+
+TGT_PATH = ${LIBPATH#/}
+TGT__ATH = ${_IBPATH#/}
+__EOF
+)
+
 	if [ ! -z "$USE_NDK" ]; then
-ANDROID_MK=$(cat -<<__EOF
+		ANDROID_MK=$(cat -<<__EOF
 $ANDROID_MK
 LOCAL_CFLAGS += -I\$(LOCAL_PATH)/platform/${ARCH}/\$(TARGET_ARCH)/include $linebreak
         -I\$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include $linebreak
@@ -526,8 +586,6 @@ __EOF
 	else
 		ANDROID_MK=$(cat -<<__EOF
 $ANDROID_MK
-
-
 LOCAL_C_INCLUDES := \$(LOCAL_PATH)/platform/${ARCH}/\$(TARGET_ARCH)/include $linebreak
         \$(LOCAL_PATH)/arch/\$(TARGET_ARCH)/include $linebreak
         external/stlport/stlport $linebreak
@@ -569,9 +627,14 @@ __EOF
 	find "${CDIR}/include" -type f -exec ln -s "{}" "${dir}" \; 2>/dev/null
 	ln -s "${CDIR}/arch" "${dir}" 2>/dev/null
 	ln -s "${CDIR}/platform" "${dir}" 2>/dev/null
-	ln -s "${CDIR}/scripts/Makefile.${ARCH}" "${dir}/Makefile" 2>/dev/null
-	if [ "${ARCH}" = "arm" ]; then
-		echo -e "${ANDROID_MK}" > "${dir}/Android.mk"
+	if [ "${LIBTYPE}" = "macho" ]; then
+		ln -s "${CDIR}/scripts/Makefile.macho" "${dir}/Makefile" 2>/dev/null
+		echo -e "${MACHO_MK}" > ${dir}/Makefile.inc
+	else
+		ln -s "${CDIR}/scripts/Makefile.${ARCH}" "${dir}/Makefile" 2>/dev/null
+		if [ "${ARCH}" = "arm" ]; then
+			echo -e "${ANDROID_MK}" > "${dir}/Android.mk"
+		fi
 	fi
 
 	# start the ASM file
@@ -583,60 +646,63 @@ function write_wrappers() {
 	#local _libname="${OUTDIR}/$1/$(basename $1)"
 	local _libname="$1"
 	local dir=$(dirname "${_libname}")
-	local _libpath="$2"
 	local _outfile
 	local libname=
 	local fcn=
 	local num=
-	LIBPATH=${_libpath}
+	_IBPATH="$2"
+	LIBPATH="$3"
+
 	LIB="$(basename $1)"
 
     # MachO
     if [ "$LIBTYPE" = "macho" ]; then
         libname=${_libname%.dylib}.S
-                echo -e "\tcreating library project in '${dir}'..."
+        echo -e "\tcreating library project in '${dir}'..."
         __setup_wrapped_lib "${dir}" "${libname}"
+
+        echo -e -n "\twriting ${#SYSCALLS[@]} syscall wrappers"
         __line_len=40
-        echo -e -n "\twriting syscall wrappers"
+		x=0
         for sc in "${SYSCALLS[@]}"; do
             fcn=${sc#*:}
             # Skip writting wrappers for indirect symbols
             should_wrap_${ARCH}_${LIBTYPE} "$fcn"
             if [ $__SHOULD_WRAP -eq 1 ]; then
                 write_sym "WRAP" "${LIB}" "${fcn}" "${libname}"
-                x=$((x+1))
+                x=$(($x+1))
             fi
         done
         echo ""
-        echo -e "\twrote $x syscall wrappers"
+		echo -e "\t                            (wrote $x syscall wrappers)"
         echo "" >> "${libname}"
 
         __line_len=40
         x=0
         if [ $WRAPALL -eq 1 ]; then
-            echo -e -n "\twriting syscall wrappers"
+            echo -e -n "\twriting ${#FUNCTIONS[@]} wrappers"
             for e in "${FUNCTIONS[@]}"; do
                 # Skip writting wrappers for indirect symbols
                 should_wrap_${ARCH}_${LIBTYPE} "$e"
                 if [ $__SHOULD_WRAP -eq 1 ]; then
                     write_sym "WRAP" "${LIB}" "${e}" "${libname}"
-                    x=$((x+1))
+                    x=$(($x+1))
                 fi
             done
             echo ""
-            echo -e "\twrote $x syscall wrappers"
+            echo -e "\t                            (wrote $x function wrappers)"
         else
-            echo -e -n "\twriting function wrappers"
+            echo -e -n "\twriting ${#FUNCTIONS[@]} function wrappers"
             for e in "${FUNCTIONS[@]}"; do
                 # Skip writting wrappers for indirect symbols
                 should_wrap_${ARCH}_${LIBTYPE} "$e"
                 if [ $__SHOULD_WRAP -eq 1 ]; then
                     write_sym "PASS" "${LIB}" "${e}" "${libname}"
-                    x=$((x+1))
+                    x=$(($x+1))
                 fi
             done
             echo ""
-            echo -e "\twrote $x function wrappers"
+            echo -e "\t                            (wrote $x function wrappers)"
         fi
         echo ""
         rm $tf_directsyms
@@ -690,8 +756,41 @@ function is_syscall() {
 function should_wrap_armv7_macho() {
 	local sym="$1"
 
+	if [ "$sym" = "___libkernel_init" ]; then
+		__SHOULD_WRAP=0
+		return;
+	fi
+	if [ "$sym" = "___error" ]; then
+		__SHOULD_WRAP=0
+		return;
+	fi
+
+	__SHOULD_WRAP=0
+	grep -wq "$sym" "$tf_code_syms"
+	if [ "$?" -eq 0 ]; then
+		__SHOULD_WRAP=1
+	fi
+	return
+}
+
+function should_wrap_armv7s_macho() {
+	should_wrap_armv7_macho "$@"
+}
+
+function should_wrap_arm64_macho() {
+	local sym="$1"
+
+	if [ "$sym" = "___libkernel_init" ]; then
+		__SHOULD_WRAP=0
+		return;
+	fi
+	if [ "$sym" = "___error" ]; then
+		__SHOULD_WRAP=0
+		return;
+	fi
+
     __SHOULD_WRAP=0
-    grep -wq "$sym" "$tf_directsyms"
+    grep -wq "$sym" "$tf_code_syms"
     if [ "$?" -eq 0 ]; then
         __SHOULD_WRAP=1
     fi
@@ -718,6 +817,56 @@ function should_wrap_arm_elf() {
 }
 
 #
+# Find function aliases in the Mach-O
+#
+function find_dup_macho_symbols() {
+	local dylib="$1"
+	local tmpfile="${CDIR}/.$$.$RANDOM.tmp"
+	local awkprogfile="${CDIR}/.$$.$RANDOM.awk"
+
+	local awk_print_dups='
+BEGIN { addr = 0; sym = ""; last_addr = 0; }
+/^[0-9a-fA-F]+ T / {
+	sa = match($0, /^[0-9a-fA-F]+ T /);
+	addr = substr($0,RSTART,RLENGTH-3);
+	ss = match($0, / T .*/);
+	sym=substr($0,RSTART+3,RLENGTH-3);
+	if (addr == last_addr && sym != "") {
+		dups[sym] = 1;
+	} else {
+		n = 0; for (x in dups) { n++ }
+		if (n > 1) {
+			for (s in dups) { printf "%s ", s }
+			print "";
+		}
+		delete dups;
+		dups[sym]=1;
+	}
+	last_addr = addr;
+}'
+
+	echo ${awk_print_dups} > "${awkprogfile}"
+	echo -e -n "\tsearching dynamic symbol table for duplicate symbols..."
+	#
+	# Use awk to collect a list of globally exported, aliased symbols into a tempfile
+	#
+	${NM} -arch ${ARCH} -gn ${dylib} | awk -f "${awkprogfile}" > "${tmpfile}"
+
+	sym_idx=0
+	declare -a syms=( )
+	while read -r line; do
+		syms=( $line )
+		DUP_SYMS[${sym_idx}]="${syms[@]}"
+		DUP_SYM_SEQ_A[${sym_idx}]="$(seq 0 $((${#syms[@]}-1)))"
+		sym_idx=$(($sym_idx + 1))
+	done < "$tmpfile"
+	rm -f "$tmpfile"
+	rm -f "$awkprogfile"
+	echo "${#DUP_SYMS[@]}"
+	DUP_SYMS_SEQ="$(seq 0 $((${#DUP_SYMS[@]}-1)))"
+}
+
+#
 # Find entry points in a Mach-O binary
 #
 function macho_functions() {
@@ -725,7 +874,7 @@ function macho_functions() {
 	local entries=
 	local libarch=
 
-	if [ ! "$ARCH" = "armv7" ]; then
+	if [ "${ARCH:0:5}" != "armv7" -a "$ARCH" != "arm64" ]; then
 		echo "E:"
 		echo "E: Architecture '$ARCH' is unsupported!"
 		echo "E:"
@@ -738,20 +887,26 @@ function macho_functions() {
 		libarch="-arch $libarch"
 	fi
 
-    entries=( $(${OTOOL} $libarch -tV "$dylib" | grep '^[^[]*:\s*$' \
+    entries=( $(grep '^[^[]*:\s*$' "${tf_code}" \
         | grep -v "$dylib" | $SED 's/:[ ]*//g') )
+	_entries_seq="$(seq 0 $((${#entries[@]}-1)))"
+	echo "" > "$tf_code_syms"
+    for idx in ${_entries_seq}; do
+		echo "${entries[$idx]}" >> "$tf_code_syms"
+	done
 
     FUNCTIONS=( )
-    for idx in $(seq 0 $((${#entries[@]}-1))); do
-		is_syscall "${entries[$idx]}"
-        #if [ $__FOUND_SYSCALL -eq 0 -a $__SHOULD_WRAP -eq 1 ]; then
-        if [ "$__FOUND_SYSCALL" -eq "0" ]; then
-            FUNCTIONS+=( "${entries[$idx]}" )
+    for idx in ${_entries_seq}; do
+		fcn="${entries[$idx]}"
+		is_syscall "$fcn"
+		should_wrap_${ARCH}_${LIBTYPE} "$fcn"
+        if [ $__FOUND_SYSCALL -eq 0 -a $__SHOULD_WRAP -eq 1 ]; then
+            FUNCTIONS+=( "${fcn}" )
         fi
     done
 	echo -e "\t    (found ${#entries[@]} Mach-O entry points, ${#FUNCTIONS[@]} non-syscall)"
-    #TODO:
-    #Duplicate MachO symbols?
+
+	find_dup_macho_symbols "$dylib"
 }
 
 #
@@ -761,9 +916,8 @@ function macho_functions() {
 function elf_functions() {
 	local lib="$1"
 	local fcn=
-	local entries=( $(cat "$tf_code" \
-				| grep '^[0-9a-f][0-9a-f]* <[^-@>\.][^-@>\.]*>:' \
-				| $SED 's/.*<\([^>]*\)>:/\1/') )
+	local entries=( $(grep '^[0-9a-f][0-9a-f]* <[^-@>\.][^-@>\.]*>:' "${tf_code}" \
+					  | $SED 's/.*<\([^>]*\)>:/\1/') )
 	FUNCTIONS=( )
 	FUNCTIONS_SEQ="$(seq 0 $((${#entries[@]}-1)))"
 	echo -e "\tparsing function list..."
@@ -840,22 +994,39 @@ function strip_macho_library() {
     tf_directsyms="${CDIR}/.$$.$RANDOM.directsyms.tmp"
     local tf_dynsyms="${CDIR}/.$$.$RANDOM.dynsyms.tmp"
 
-	if [ ! "$ARCH" = "armv7" ]; then
+	if [ "${ARCH:0:5}" != "armv7" -a "$ARCH" != "arm64" ]; then
 		echo "E: Architecture '$ARCH' is unsupported!"
 		exit -1
 	fi
 
     libarch="-arch $ARCH"
 
+    SYM_re=
+    if [ "${ARCH:0:5}" = "armv7" ]; then
+        DYNSYM_re='s,^[0-9a-f]\{8\}[[:space:]]T[[:space:]],,g'
+        INDSYM_re='s,^0x[0-9a-f]\{8\}[[:space:]][[:space:]]*.*[[:space:]],,g'
+        AWK_saveprog='{print "SAVED(0x"$1","$3")"}'
+        AWK_symprog='{print "SYM(0x"$1","$3")"}'
+    elif [ "$ARCH" = "arm64" ]; then
+        DYNSYM_re='s,^[0-9a-f]\{16\}[[:space:]]T[[:space:]],,g'
+        INDSYM_re='s,^0x[0-9a-f]\{16\}[[:space:]][[:space:]]*.*[[:space:]],,g'
+        AWK_saveprog='{print "SAVED(0x"$1"ull,"$3")"}'
+        AWK_symprog='{print "SYM(0x"$1"ull,"$3")"}'
+    fi
+
+    # Thin the binary to get accurate offsets
+    ${LIPO} -thin ${ARCH} "$in" -output "${out}.tmp"
+    in=${out}.tmp
+
     # Get all dynamic exported symbols that are defined in __Text __text
     ${NM}  $libarch -s __TEXT __text "$in" \
             | grep ".*\s[T]\s.*" \
-            | ${SED} 's,^[0-9a-f]\{8\}[ ]T[ ],,g' \
+            | ${SED} "${DYNSYM_re}" \
             | sort -u > "$tf_dynsyms"
 
     # Get all indirectly referenced symbols
     ${OTOOL} $libarch -I -V "$in" \
-            | ${SED} 's,^0x[0-9a-f]\{8\}[ ]*.*[ ],,g' \
+            | ${SED} "${INDSYM_re}" \
             | grep "^_"  \
             | sort -u > "$tf_indirectsyms"
 
@@ -867,14 +1038,15 @@ function strip_macho_library() {
 
     # Extract a non-function symbol and remember its name and address.
     # This will be used to find the address where the binary will be loaded.
-    ${NM} $libarch -s __TEXT __text "$in" \
-        | grep ".*\s[T]\s.*" \
-        | awk '{print "SAVED(0x"$1","$3")"}' | head -n 1 >> "${symtable}"
+
+    ${NM} $libarch "$in" \
+        | grep ".*\s[^Tt]\s.*" \
+        | awk "${AWK_saveprog}" | head -n 1 >> "${symtable}"
 
     # Write out 'symtable' with format 'SYM(ADDR,NAME)' for all symbols.
     ${NM} $libarch -s __TEXT __text "$in" \
         | grep ".*\s[T]\s.*" \
-        | awk '{print "SYM("0x$1","$3")"}'  >> "${symtable}"
+        | awk "${AWK_symprog}"  >> "${symtable}"
 
 	# Apple Strip options:
 	# -u        :  Save all undefined symbols
@@ -882,12 +1054,18 @@ function strip_macho_library() {
 	# -i        :  Ignore symbols listed in {file} that are _not_ in ${in}
 	# -S        :  Remove debugging symbols
 	# -o {file} :  Write output library to {file}
-    echo -e "\tFound $(wc -l $tf_dynsyms) dynsyms."
-    echo -e "\tDirect symbols: $(wc -l $tf_directsyms)"
-    echo -e "\tIndirect symbols: $(wc -l $tf_indirectsyms)"
+	echo -e "\tFound $(wc -l $tf_dynsyms | awk '{print $1}') dynsyms."
+	echo -e "\tDirect symbols: $(wc -l $tf_directsyms | awk '{print $1}')"
+	echo -e "\tIndirect symbols: $(wc -l $tf_indirectsyms | awk '{print $1}')"
 
     #  strip (hide) direct MachO symbols
     ${STRIP} $libarch -u -R "${tf_directsyms}" -i -S -o "$out" - "$in"
+
+    # Change the ID / install name of the output MachO
+    ${INSTALL_NM_TOOL} -id ${_IBPATH} "${out}"
+    ${INSTALL_NM_TOOL} -change ${LIBPATH} ${_IBPATH} "${out}"
+
+	rm "${out}.tmp" 2>/dev/null
 
     rm $tf_dynsyms
     rm $tf_indirectsyms
@@ -918,7 +1096,9 @@ if [ "$LIBTYPE" = "elf" ]; then
 		LIB_BASE="/lib"
 	fi
 elif [ "$LIBTYPE" = "macho" ]; then
-	LIB_BASE="/usr/lib"
+	# grab the actual install base from the library
+	_LIB_BASE="$(${OTOOL} -arch ${ARCH} -L "${LIB}" | grep compatibility | grep "${LIB//*\/}" | awk '{print $1}')"
+	LIB_BASE="${_LIB_BASE%/*}"
 fi
 
 if [ ! -z "$SYMFILE" ]; then
@@ -934,6 +1114,7 @@ if [ -z "${LIB}" -a -d "${LIBDIR}" ]; then
     # Extracting syscalls from libsystem_kernel
     tf_code="${CDIR}/.$$.$RANDOM.code.tmp"
     tf_syscalls="${CDIR}/.$$.$RANDOM.syscalls.tmp"
+    tf_code_syms="${CDIR}/.$$.$RANDOM.code_syms"
     extract_code "$LIB_KERNEL" "$tf_code"
     extract_syscalls "$tf_code" "$tf_syscalls"
     rm $tf_code
@@ -958,18 +1139,26 @@ if [ -z "${LIB}" -a -d "${LIBDIR}" ]; then
         _l_out="${_l_symdir}/$(basename ${_l})"           #wrapped library
         _l_real="${_l_symdir}/${LIBPFX}$(basename ${_l})" #source library after HIDDING all symbols
 
+        _IBPATH="${LIB_BASE}/${__l//./_}"
+        LIBPATH="${LIB_BASE}/$(basename ${_l_out})"
+
         tf_code="${CDIR}/.$$.$RANDOM.code.tmp"
+        tf_code_syms="${CDIR}/.$$.$RANDOM.code_syms"
         extract_code "$l" "$tf_code"
+        extract_syscalls "$tf_code" "$tf_syscalls"
         extract_syscall_tree "$tf_code" "$tf_syscalls"
         extract_functions "$l"
         strip_library "$l" "${_l_real}" "${_l_symdir}/real_syms.h"
-        write_wrappers "${_l_out}" "${LIB_BASE}/${__l//./_}"
+        write_wrappers "${_l_out}" "${_IBPATH}" "${LIBPATH}"
+
         rm -f "$tf_code"
+		rm -f "$tf_code_syms"
     done
     rm -f "$tf_syscalls"
 else
     tf_code="${CDIR}/.$$.$RANDOM.code.tmp"
     tf_syscalls="${CDIR}/.$$.$RANDOM.syscalls.tmp"
+    tf_code_syms="${CDIR}/.$$.$RANDOM.code_syms"
     echo "Processing '$LIB'..."
 	_l=$(basename ${LIB})
 	__l="_${_l:1}"
@@ -979,6 +1168,9 @@ else
 	fi
 	_l_out="${_l_symdir}/${_l}"
 	_l_real="${_l_symdir}/${LIBPFX}${_l}"
+	_IBPATH="${LIB_BASE}/${__l//./_}"
+	LIBPATH="${LIB_BASE}/$(basename ${_l_out})"
+
 	extract_code "$LIB" "$tf_code"
 	if [ $WRAPALL -eq 0 ]; then
 		extract_syscalls "$tf_code" "$tf_syscalls"
@@ -986,7 +1178,8 @@ else
 	fi
     extract_functions "$LIB"
 	strip_library "$LIB" "${_l_real}" "${_l_symdir}/real_syms.h"
-	write_wrappers "${_l_out}" "${LIB_BASE}/${__l//./_}"
+	write_wrappers "${_l_out}" "${_IBPATH}" "${LIBPATH}"
     rm -f "$tf_code"
+	rm -f "$tf_code_syms"
     rm -f "$tf_syscalls"
 fi
