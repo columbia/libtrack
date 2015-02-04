@@ -86,7 +86,7 @@ sub find_syscalls {
 
 		# Parse a line of ARMv7 dis-assembly to get the address,
 		# raw hex instruction value, ASCII instruction, and operands
-		if (/^([0-9a-f]+)\t\s*([0-9a-f]+)\t\s*([.a-z]+)(.*)$/) {
+		if (/^([0-9a-f]+)\s+([0-9a-f]+)\s+([.a-z]+)\s+(.*)$/) {
 			#($addr, my $unparsed) = strtol("0x$1");
 			#if ($unparsed != 0 || $!) {
 			#	$addr = -1;
@@ -101,7 +101,8 @@ sub find_syscalls {
 		}
 
 		# Look for branches that target one of the syscalls
-		if ($ins =~ /^b.*/ and $ops =~ /.*for: (.*)$/) {
+		#if ($ins =~ /^b.*/ and $ops =~ /.*for: (.*)$/) {
+		if ($ins =~ /^b.*/ and ($ops =~ /.*for: (.*)$/ or $ops =~ /^(_{1,3}.+)\s*$/)) {
             # $sc is the branch's target
 			my $sc = $1;    
             #warn "\t\t(b:$sc)\n";

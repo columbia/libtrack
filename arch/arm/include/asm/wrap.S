@@ -6,7 +6,8 @@
  * compile under both. For a method of merging the two see:
  *        http://psellos.com/2012/08/2012.08.arm-as-to-ios-4.html
  */
-#define __concat(_a,_b) _a##_b
+#define ___concat(_a,_b) _a##_b
+#define __concat(_a,_b) ___concat(_a,_b)
 #define  _concat(_a,_b) __concat(_a,_b)
 #define   concat(_a,_b)  _concat(_a,_b)
 
@@ -25,15 +26,31 @@
 #define _amarg(arg,pos)			#pos
 #define _FN(x) concat(_,x)
 #define FUNC_LBL(x) \
-	.text; .align 4; .globl _FN(x);  _FN(x):
+	.text; .align 4; .globl x;  x:
 #define ENTRY(x) \
 	FUNC_LBL(x); \
 	.arm
 #define END(x)
 #define STRING(nm, val) \
-	.text; .globl nm; nm: .asciz val
+	.cstring; .align 4; .globl nm; nm: .asciz val
+
+#define INDIRECT_SYM(nm) \
+	concat(concat(L_,_FN(nm)),_non_lazy_ptr)
+#define INDIRECT_SYM_ENTRY(nm) \
+	.non_lazy_symbol_pointer; .align 4; \
+	INDIRECT_SYM(nm): \
+	.indirect_symbol _FN(nm); \
+	.long 0
+
+	.macro ind_symaddr /* $0 = reg, $1 = symname, $2 indirect_symname */
+	movw	$0, #:lower16:(($2 - .) - 16)
+	movt	$0, #:upper16:(($2 - .) - 12)
+	add		$0, pc
+	ldr		$0, [$0] /* one more level of indirection */
+	.endm
 
 	.macro unwind_linkage
+	.save {r0-r11,lr}
 	.endm
 #if defined(MODEL_armv6)
         .machine  armv6
@@ -41,8 +58,6 @@
         cmp     $0, #0
         beq     $1
         .endm
-#else
-        .machine  armv7
 #endif
         .macro  .type
         .endm
@@ -50,7 +65,9 @@
         .endm
 	.macro  .save
 	.endm
+
 #else /* non-Apple assembler (presumably GNU) */
+
 #define LBL(s) .L ## s
 #define MACRO0(nm)			.macro nm
 #define MACRO1(nm, arg0)		.macro nm arg0
@@ -68,10 +85,17 @@
 #define END(x) \
 	.fnend; .size _FN(x), .-_FN(x)
 #define STRING(nm, val) \
-	.text; .globl nm; nm: .asciz val
+	.cstring; .globl nm; nm: .asciz val
 
 	.macro unwind_linkage
 	.save {r0-r11,lr}
+	.endm
+
+#define INDIRECT_SYM(nm) nm
+#define INDIRECT_SYM_ENTRY(nm)
+
+	.macro ind_symaddr reg symname indirect_symname
+	symaddr \reg, \symname
 	.endm
 #endif
 /* End Apple compatibility macros */
@@ -94,7 +118,9 @@
 	.globl marg(__libhandle_,\libname,$0)
 marg(__libhandle_,\libname,$0):
 	.word 0
+	.align 4
 STRING(marg(__wraplib_str_,\libname,$0), _amarg(\libname,$0))
+	.align 4
 STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
 	.endm
 
@@ -106,8 +132,8 @@ STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
  * do handy things like this for you... grrrrr.
  */
 	MACRO2(symaddr, reg, symname) /* $0 = reg, $1 = symname */
-	movw	_marg(\reg,$0), #:lower16:(_marg(\symname,$1) - . - 16)
-	movt	_marg(\reg,$0), #:upper16:(_marg(\symname,$1) - . - 12)
+	movw	_marg(\reg,$0), #:lower16:((_marg(\symname,$1) - .) - 16)
+	movt	_marg(\reg,$0), #:upper16:((_marg(\symname,$1) - .) - 12)
 	add	_marg(\reg,$0), pc
 	.endm
 
@@ -118,7 +144,7 @@ STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
  * puts the address into the 'reg' register, stomps on 'tmp' register as well
  */
 	MACRO2(get_wrapping_tls_val, reg, tmp) /* $0 = reg, $1 = tmp */
-	symaddr	_marg(\reg,$0), s_wrapping_key
+	ind_symaddr _marg(\reg,$0), s_wrapping_key, INDIRECT_SYM(s_wrapping_key)
 	ldr	_marg(\reg,$0), [_marg(\reg,$0)]
 	cmp	_marg(\reg,$0), #0
 	ble	0f
@@ -135,7 +161,7 @@ STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
  * puts the address into the 'ip' register
  */
 	MACRO3(set_wrapping_tls_val, reg, tmp1, tmp2)
-	symaddr	_marg(\tmp1,$1), s_wrapping_key
+	ind_symaddr _marg(\tmp1,$1), s_wrapping_key, INDIRECT_SYM(s_wrapping_key)
 	ldr	_marg(\tmp1,$1), [_marg(\tmp1,$1)]
 	cmp	_marg(\tmp1,$1), #0
 	ble	1f
@@ -177,8 +203,8 @@ STRING(marg(__wraplib_path_,\libname,$0), _amarg(\path,$1))
 /*
  * @func_alias - output the start of a function
  */
-	MACRO2(func_alias, sym, pfx)
-FUNC_LBL(_marg(\pfx,$1)_marg(\sym,$0))
+	MACRO3(func_alias, alias, sym, pfx)
+FUNC_LBL(_marg(\pfx,$2)_marg(\alias,$0))
 	.endm
 
 /*
@@ -193,10 +219,16 @@ FUNC_LBL(_marg(\pfx,$1)_marg(\sym,$0))
  * library.
  */
 #ifdef WRAP_RETURN_FUNC
+ENTRY(concat(__,WRAP_RETURN_FUNC))
+	b	_FN(WRAP_RETURN_FUNC)
+END(concat(_,WRAP_RETURN_FUNC))
+
+INDIRECT_SYM_ENTRY(s_wrapping_key)
+
 ENTRY(concat(arch_,WRAP_RETURN_FUNC))
 	/* push return values: r0-r3 */
 	push	{r0-r3}
-	symaddr	ip, _FN(WRAP_RETURN_FUNC)
+	symaddr	ip, concat(_,_FN(WRAP_RETURN_FUNC))
 	/*
 	 * overhead before gettimeofday: 4 instructions + wrapped_return
 	 * preamble (~3 instructions)
@@ -229,6 +261,7 @@ END(concat(arch_,WRAP_RETURN_FUNC))
 	.align 4
 marg(__wrapsym_,\wrapsym,$1):
 	.word 0
+	.align 4
 STRING(marg(__wrapstr_,\wrapsym,$1), _amarg(\wrapsym,$1))
 	.endm
 
@@ -284,7 +317,7 @@ ENTRY(_marg(\pfx,$2)_marg(\wrapsym,$1))
 	ldr	ip, [r8]
 	set_wrapping_tls_val ip, r0, r1
 	/* replace original LR with arch_wrapped_return */
-	symaddr ip, _FN(concat(arch_,WRAP_RETURN_FUNC))
+	symaddr ip, concat(arch_,WRAP_RETURN_FUNC)
 	str	ip, [r8]  /* replace LR: return through arch_wrapped_return! */
 	/*
 	 * overhead between gettimeofday and actual function invocation:
@@ -292,7 +325,7 @@ ENTRY(_marg(\pfx,$2)_marg(\wrapsym,$1))
 	 */
 	b	7f /* call the function (return through arch_wrapped_return) */
 
-6:	symaddr	r5, _FN(WRAP_RETURN_FUNC)
+6:	symaddr	r5, concat(__,WRAP_RETURN_FUNC)
 #endif /* WRAP_RETURN_FUNC */
 #endif /* WRAP_TRACE_FUNC */
 	/* restore registers and make the original function call
@@ -312,6 +345,7 @@ END(_marg(\pfx,$2)_marg(\wrapsym,$1))
 	.align 4
 marg(__wrapsym_,\wrapsym,$1):
 	.word 0
+	.align 4
 STRING(marg(__wrapstr_,\wrapsym,$1), _amarg(\wrapsym,$1))
 	.endm
 
