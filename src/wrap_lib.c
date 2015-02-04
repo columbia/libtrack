@@ -205,7 +205,7 @@ _static inline FILE *__open_stdlogfile(struct tls_info *tls)
 	FILE *logf;
 	char *buf = &(tls->logname[0]);
 	const char *nm = local_strrchr(progname, '/');
-	libc.snprintf(buf, sizeof(tls->logname), "%s/%d.%d.%s.%s.log",
+	libc._snprintf(buf, sizeof(tls->logname), "%s/%d.%d.%s.%s.log",
 		      LOGFILE_PATH, libc.getpid(),
 		      libc.gettid(), _str(_IBNAM_),
 		      nm ? nm+1 : progname);
@@ -222,7 +222,7 @@ _static inline struct gzFile *__open_gzlogfile(struct tls_info *tls)
 	struct gzFile *gzlogf;
 	char *buf = &(tls->logname[0]);
 	const char *nm = local_strrchr(progname, '/');
-	libc.snprintf(buf, sizeof(tls->logname), "%s/%d.%d.%s.%s.log.gz",
+	libc._snprintf(buf, sizeof(tls->logname), "%s/%d.%d.%s.%s.log.gz",
 		      LOGFILE_PATH, libc.getpid(),
 		      libc.gettid(), _str(_IBNAM_),
 		      nm ? nm+1 : progname);
@@ -451,7 +451,7 @@ int wrapped_tracer(const char *symbol, void *symptr, void *regs, void *stack)
 	if (tls->info.should_log) {
 		void *f;
 		libc.gettimeofday(&tls->info.tv, NULL);
-		tls->info.tv_strlen = libc.snprintf(tls->info.tv_str, sizeof(tls->info.tv_str) - 1,
+		tls->info.tv_strlen = libc._snprintf(tls->info.tv_str, sizeof(tls->info.tv_str) - 1,
 						    "%lu.%lu:", (unsigned long)tls->info.tv.tv_sec,
 						    (unsigned long)tls->info.tv.tv_usec);
 		init_dvm(&dvm);
@@ -523,8 +523,85 @@ out:
 	return did_wrap;
 }
 
+
+#ifdef __APPLE__
+#include <mach/thread_info.h>
+extern unsigned int _raw_thread_self(void);
+typedef int (*__real_thread_info_func)(unsigned int target_thread,
+				       thread_flavor_t flavor,
+				       thread_info_t thread_info,
+				       unsigned int *thread_info_count);
+static __real_thread_info_func __real_thread_info = NULL;
+
+#if defined(_LIBSYSTEM_KERNEL) && _LIBSYSTEM_KERNEL == 1
+#define LSK_PATH _IBPATH
+#define __dlsym(x,y) table_dlsym(x, y, 1)
+#else
+#define LSK_PATH "/usr/lib/system/libsystem_kernel.dylib"
+#define __dlsym(x,y) dlsym(x, y)
+#endif
+
+int __hidden apple_thread_cpu_time(int id, struct timespec *ts)
+{
+	struct tls_info *tls = get_tls();
+	unsigned int count = THREAD_BASIC_INFO_COUNT;
+	thread_basic_info_data_t info;
+
+	if (id != CLOCK_THREAD_CPUTIME_ID)
+		return -1;
+
+	if (!__real_thread_info) {
+		static void *lsk_dso = NULL;
+		if (!lsk_dso) {
+			lsk_dso = dlopen(LSK_PATH, RTLD_NOW|RTLD_LOCAL);
+			if (!lsk_dso)
+				return -1;
+		}
+		__real_thread_info = __dlsym(lsk_dso, "thread_info");
+		if (!__real_thread_info) {
+			__real_thread_info = __dlsym(lsk_dso, "_thread_info");
+			if (!__real_thread_info)
+				__real_thread_info = (void *)0x1;
+		}
+	}
+	if (__real_thread_info == (void *)0x1)
+		return -1;
+
+	if (!tls->thread_self) {
+		tls->thread_self = _raw_thread_self();
+		if (!tls->thread_self)
+			return -1;
+	}
+
+	if (!ts)
+		return 0;
+
+	int kr = __real_thread_info(tls->thread_self, THREAD_BASIC_INFO,
+				    (thread_info_t)&info, &count);
+	if (kr != KERN_SUCCESS)
+		return -1;
+
+	ts->tv_sec = info.user_time.seconds;
+	ts->tv_nsec = info.user_time.microseconds * 1000;
+
+	ts->tv_nsec += info.system_time.microseconds * 1000;
+	while (ts->tv_nsec > (1000*1000*1000)) {
+		ts->tv_nsec -= (1000*1000*1000);
+		ts->tv_sec += 1;
+	}
+	ts->tv_sec += info.system_time.seconds;
+	return 0;
+}
+#undef __dlsym
+#endif /* __APPLE__ */
+
 int __hidden init_libc_iface(struct libc_iface *iface, const char *dso_path)
 {
+	/* avoid compiler warning */
+	(void)dl_dli;
+	(void)addr_blacklist;
+	(void)blacklist_sz;
+
 	if (!iface->dso) {
 		/* guard against recursive calls from library initializers */
 		iface->dso = (void *)1;
@@ -590,7 +667,7 @@ int __hidden init_libc_iface(struct libc_iface *iface, const char *dso_path)
 	init_sym(iface, 0, pthread_mutex_lock,);
 	init_sym(iface, 0, pthread_mutex_unlock,);
 
-	init_sym(iface, 1, snprintf,);
+	init_sym(iface, 1, _snprintf,snprintf);
 	init_sym(iface, 1, printf,);
 	init_sym(iface, 1, fprintf,);
 	init_sym(iface, 1, strtol,);
@@ -599,7 +676,11 @@ int __hidden init_libc_iface(struct libc_iface *iface, const char *dso_path)
 	init_sym(iface, 1, malloc,);
 	init_sym(iface, 1, free,);
 	init_sym(iface, 1, gettimeofday,);
+#ifdef __APPLE__
+	iface->clock_gettime = apple_thread_cpu_time;
+#else
 	init_sym(iface, 1, clock_gettime,);
+#endif
 	init_sym(iface, 1, setenv,);
 	init_sym(iface, 1, getenv,);
 
@@ -618,7 +699,7 @@ int __hidden init_libc_iface(struct libc_iface *iface, const char *dso_path)
 
 	/* unwind interface */
 	init_sym(iface, 0, _Unwind_GetIP,);
-#ifdef __arm__
+#if defined(__arm__) && !defined(__clang__)
 	init_sym(iface, 0, _Unwind_VRS_Get,);
 #endif
 	init_sym(iface, 0, _Unwind_Backtrace,);

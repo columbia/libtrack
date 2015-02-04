@@ -11,6 +11,28 @@
 
 #define TLS_MAX_STRING_LEN 256
 
+#ifndef ANDROID
+static inline void _pth_cleanup_push(__pthread_cleanup_t *handler, __pthread_cleanup_func_t func, void *arg)
+{
+	pthread_t __self = pthread_self();
+	handler->__routine = func;
+	handler->__arg = arg;
+	handler->__next = __self->__cleanup_stack;
+	__self->__cleanup_stack = handler;
+}
+
+static inline void _pth_cleanup_pop(__pthread_cleanup_t *handler, int execute)
+{
+	pthread_t __self = pthread_self();
+	__self->__cleanup_stack = handler->__next;
+	if (execute)
+		(handler->__routine)(handler->__arg);
+}
+#else
+#define _pth_cleanup_push libc.__pthread_cleanup_push
+#define _pth_cleanup_pop  libc.__pthread_cleanup_pop
+#endif
+
 struct tls_info {
 	char logname[TLS_MAX_STRING_LEN];
 	void *logfile;
@@ -25,9 +47,10 @@ struct tls_info {
 	struct ret_ctx ret;
 	struct log_info info;
 
-#ifdef ANDROID
 	__pthread_cleanup_t pth_cleanup;
 	int should_cleanup;
+#ifdef __APPLE__
+	unsigned int thread_self;
 #endif
 };
 

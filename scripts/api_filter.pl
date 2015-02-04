@@ -199,12 +199,17 @@ my %_never_wrap = (
 		   ".plt" => 1,
 		   "__libc_init" => 1,
 		   "__errno" => 1,
+		   "__error" => 1,
 		   "__aeabi_atexit" => 1,
 		   "__cxa_atexit" => 1,
 		   "__cxa_finalize" => 1,
 		   "__init_tls" => 1,
 		   "__thread_entry" => 1,
 		   "__set_tls" => 1,
+
+		   "__libkernel_init" => 1,
+		   "___libkernel_init" => 1,
+		   "___error" => 1,
 
 		   # unwind functions
 		   "_Unwind_Resume" => 1,

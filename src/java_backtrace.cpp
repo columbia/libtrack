@@ -3,9 +3,6 @@
  * Copyright (C) 2013 Jeremy C. Andrus <jeremya@cs.columbia.edu>
  *
  */
-#pragma GCC diagnostic ignored "-fpermissive"
-#ifdef ANDROID
-
 #include <string>
 
 #include <dlfcn.h>
@@ -14,6 +11,9 @@
 
 #include "wrap_lib.h"
 #include "java_backtrace.h"
+
+#ifdef ANDROID
+#pragma GCC diagnostic ignored "-fpermissive"
 
 /*
  * TODO: use libgccdemangle.so to auto-mangle these names?
@@ -399,7 +399,7 @@ do_lookup:
 	std::string name;
 	name = dvm->dvmHumanReadableMethod(m, DVM_BT_GET_SIGNATURE);
 	if (cline) {
-		libc.snprintf(cline->str, MAX_LINE_LEN, "%s:", name.c_str());
+		libc._snprintf(cline->str, MAX_LINE_LEN, "%s:", name.c_str());
 		__bt_printf(tls, ":%d:%s", count, cline->str);
 		return;
 	}
@@ -429,5 +429,10 @@ void __hidden print_dvm_bt(struct tls_info *tls, struct dvm_iface *dvm,
 
 	/* bt_printf(tls, "DVM:BT_END:"); */
 	return;
+}
+#else /* !ANDROID */
+void __hidden tls_release_dvmstack(struct tls_info *tls)
+{
+	(void)tls;
 }
 #endif /* ANDROID */

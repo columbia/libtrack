@@ -268,7 +268,7 @@ do_lookup:
 
 	if (cline) {
 		if (count > 0) {
-			libc.snprintf(cline->str, MAX_LINE_LEN-1,
+			libc._snprintf(cline->str, MAX_LINE_LEN-1,
 				      "%x:%s:%c0x%x:%s(%p):",
 				      (unsigned int)sym, symname,
 				      c, ofst, dli.dli_fname, dli.dli_fbase);
@@ -278,7 +278,7 @@ do_lookup:
 			 * for the last symbol in the BT stack - this allows
 			 * us to properly dynamically rename based on input
 			 */
-			libc.snprintf(cline->str, MAX_LINE_LEN,
+			libc._snprintf(cline->str, MAX_LINE_LEN,
 				      "%c0x%x:%s(%p):",
 				      c, ofst, dli.dli_fname, dli.dli_fbase);
 			__bt_printf(tls, ":0:%x:%s:%s",
@@ -296,9 +296,6 @@ _static void print_bt_state(struct tls_info *tls, struct bt_state *state)
 {
 	int count;
 	struct bt_frame *frame;
-	unsigned long ofst;
-	char c;
-	const char *sym;
 
 	bt_printf(tls, "BT:START:%d:", state->count);
 	for (count = 0; count < state->count; count++) {
@@ -339,7 +336,7 @@ std_backtrace(struct tls_info *tls)
 	print_bt_state(tls, &state);
 }
 
-#ifdef __arm__
+#if defined(__arm__) && !defined(__clang__)
 _static inline uintptr_t __Unwind_GetIP(__unwind_context *ctx)
 {
 	uint32_t val;
@@ -376,7 +373,7 @@ _static _Unwind_Reason_Code trace_func(__unwind_context* context, void* arg)
 
 	frame = &state->frame[state->count];
 
-#ifdef __arm__
+#if defined(__arm__) && !defined(__clang__)
 	/*
 	 * The instruction pointer is pointing at the instruction after the
 	 * bl(x), and the _Unwind_Backtrace routine already masks the Thumb
@@ -443,7 +440,6 @@ _static inline int is_same_stack(struct bt_frame *current, void **last, int coun
 _static void __attribute__((noinline))
 unwind_backtrace(struct tls_info *tls)
 {
-	Dl_info dli;
 	int i;
 	struct log_info *info;
 	unsigned stack_sz;

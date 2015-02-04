@@ -184,6 +184,11 @@ struct dvm_bt {
 	char count;
 };
 
+static inline void init_dvm(struct dvm_iface *dvm)
+{
+	dvm->dso = 0;
+}
+
 static inline void get_dvm(struct dvm_iface *dvm)
 {
 	(void)dvm;
@@ -202,7 +207,7 @@ static inline void init_dvm_iface(struct dvm_iface *dvm, const char *dso_path)
 	return;
 }
 
-static void close_dvm_iface(struct dvm_iface *dvm)
+static inline void close_dvm_iface(struct dvm_iface *dvm)
 {
 	if (dvm)
 		dvm->dso = 0;
@@ -220,13 +225,12 @@ static inline void get_dvm_backtrace(struct tls_info *tls,
 	return;
 }
 
-static void print_dvm_bt(struct tls_info *tls, struct dvm_iface *dvm,
-			 struct dvm_bt *dvm_bt)
+static inline void print_dvm_bt(struct tls_info *tls, struct dvm_iface *dvm,
+				struct dvm_bt *dvm_bt)
 {
 	(void)tls;
 	(void)dvm;
 	(void)dvm_bt;
-	(void)info;
 	return;
 }
 

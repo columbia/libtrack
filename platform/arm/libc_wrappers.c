@@ -210,7 +210,7 @@ static char __guess_fdtype(int fd)
 	 * On Linux/Android we can use /proc/self/fd/X to make a reasonable
 	 * guess as to the origin of this FD
 	 */
-	libc.snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
+	libc._snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
 	if (libc.readlink(path, buf, sizeof(buf)) < 0)
 		return '?';
 
@@ -309,7 +309,7 @@ static void add_entry(const char *symname, handler_func handler, int flags)
 
 	entry->name = symname;
 	entry->handler = handler;
-	entry->call_strlen = libc.snprintf(entry->call_str,
+	entry->call_strlen = libc._snprintf(entry->call_str,
 					   sizeof(entry->call_str)-1,
 					   "CALL:%s\n ", symname);
 
@@ -1357,7 +1357,7 @@ static int __rename_close(struct tls_info *tls, int fd)
 	if (!ret)
 		return 0;
 
-	libc.snprintf(ret->symmod, MAX_SYMBOL_LEN, "%s_%c",
+	libc._snprintf(ret->symmod, MAX_SYMBOL_LEN, "%s_%c",
 		      info->symbol, type ? type : '?');
 	info->symbol = (const char *)ret->symmod;
 
@@ -1449,7 +1449,7 @@ int handle_rename_fd1(struct tls_info *tls)
 	if (!ret)
 		return 0;
 
-	libc.snprintf(ret->symmod, MAX_SYMBOL_LEN, "%s_%c", info->symbol, type);
+	libc._snprintf(ret->symmod, MAX_SYMBOL_LEN, "%s_%c", info->symbol, type);
 	info->symbol = (const char *)ret->symmod;
 
 	return 0;
@@ -1598,7 +1598,7 @@ static int __epoll_modsym(struct tls_info *tls)
 
 	symptr = ret->symmod;
 	symend = symptr + MAX_SYMBOL_LEN - 1;
-	symptr += libc.snprintf(symptr, MAX_SYMBOL_LEN, "%s_", info->symbol);
+	symptr += libc._snprintf(symptr, MAX_SYMBOL_LEN, "%s_", info->symbol);
 
 	/* sort the file types using fd_types array */
 	for (i = 0; i < (int)sizeof(fd_types); i++) {
