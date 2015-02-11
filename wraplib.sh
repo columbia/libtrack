@@ -810,15 +810,13 @@ function strip_elf_library() {
     # within current shared object.
 	${ELF_OBJDUMP} -T "$out" | grep "DF\s\+\.text\s\+" \
 			| awk -F' ' '{print $6}' > "${tf_funclist}"
-
 	# Save the size of the text section
 	${ELF_READELF} -t "$out" | grep -A1 "\.text" | tail -1 | awk '{print "TEXT_SIZE(0x"$4")"}' > "${symtable}"
 
     # Extract a non-function symbol and remember its name and address.
     # This will be used to find the address where the binary will be loaded.
-    ${ELF_READELF} -s "$out" | grep -v FUNC | grep -v UND \
-			| grep GLOBAL | head -1 \
-			| awk '{print "SAVED(0x"$2","$8")"}' >> "${symtable}"
+    ${ELF_OBJDUMP} -T "$out" | grep "DO\s.bss" | head -1 \
+			| awk '{print "SAVED(0x"$1","$6")"}' >> "${symtable}"
 
     echo -e "\tHidding "$(wc -l ${tf_funclist} | $SED 's,\s.*,,g')" symbols in file "$out"."
 	# The 'STRIP' variable here points to our custom 'elfmod.py' script
