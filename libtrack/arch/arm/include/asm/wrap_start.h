@@ -22,8 +22,8 @@
 #define FUNC_END(TYPE, LIBNM, NAME,...) \
 	TYPE ## _func_end LIBNM, NAME, ## __VA_ARGS__
 
-#define FUNC_ALIAS(ALIAS, NAME,...) \
-	func_alias ALIAS, NAME, ## __VA_ARGS__
+#define FUNC_ALIAS(NAME,...) \
+	func_alias NAME, ## __VA_ARGS__
 
 #define WRAP_LIB(LIBNM, LIBPATH) \
 	wrap_lib LIBNM, LIBPATH

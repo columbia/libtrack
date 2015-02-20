@@ -43,7 +43,7 @@ static void tls_init_child(int acquire)
 	if (tls) {
 		if (tls->should_cleanup) {
 			tls->should_cleanup = 0;
-			_pth_cleanup_pop(&tls->pth_cleanup, 0);
+			libc.__pthread_cleanup_pop(&tls->pth_cleanup, 0);
 		}
 		__free_tls(tls);
 	}
@@ -70,6 +70,7 @@ void __hidden init_tls(void)
 static struct tls_info *__get_tls(int acquire, int reset)
 {
 	struct tls_info *tls = NULL;
+	int parent = 0;
 
 	if (libc.forking && libc.forking != libc.getpid()) {
 		/* we forked and we're the child, so we need to do a bit of cleanup */
@@ -98,7 +99,7 @@ static struct tls_info *__get_tls(int acquire, int reset)
 	} else {
 		tls = (struct tls_info *)libc.malloc(sizeof(*tls));
 		libc.memset(tls, 0, sizeof(*tls));
-		_pth_cleanup_push(&tls->pth_cleanup, thread_tls_cleanup, tls);
+		libc.__pthread_cleanup_push(&tls->pth_cleanup, thread_tls_cleanup, tls);
 		tls->should_cleanup = 1;
 	}
 
@@ -129,11 +130,6 @@ struct tls_info *peek_tls(void)
 	return __get_tls(0, 0);
 }
 
-#ifdef __APPLE__
-extern unsigned int _raw_task_self(void);
-extern unsigned int _raw_mach_port_deallocate(unsigned int target, unsigned int name);
-#endif
-
 static void __free_tls(struct tls_info *tls)
 {
 	if (!tls)
@@ -146,13 +142,6 @@ static void __free_tls(struct tls_info *tls)
 	tls_release_logfile(tls);
 
 	libc.memset(tls, 0, sizeof(*tls));
-
-#ifdef __APPLE__
-	if (tls->thread_self) {
-		_raw_mach_port_deallocate(_raw_task_self(), tls->thread_self);
-		tls->thread_self = 0;
-	}
-#endif
 
 	if (tls != &main_tls)
 		libc.free(tls);
@@ -168,7 +157,7 @@ void clear_tls(int release_key)
 
 	if (tls->should_cleanup) {
 		tls->should_cleanup = 0;
-		_pth_cleanup_pop(&tls->pth_cleanup, 0);
+		libc.__pthread_cleanup_pop(&tls->pth_cleanup, 0);
 	}
 
 	__free_tls(tls);

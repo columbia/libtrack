@@ -63,9 +63,9 @@ __BEGIN_DECLS
 #elif defined(__APPLE__)
 #  define LIB_PATH "/usr/lib/system"
 #  if defined(_LIBC) && _LIBC == 1
-#    define LIBC_NAME "_ibsystem_c_dylib"
+#    define LIBC_NAME "_ibc_dylib"
 #  else
-#    define LIBC_NAME "libsystem_c.dylib"
+#    define LIBC_NAME "libc.dylib"
 #  endif
 #  define LOGFILE_PATH "/tmp/trace_logs"
 #  define ENABLE_LOG_PATH "/tmp/" EN_LOG_FILE
@@ -82,22 +82,12 @@ __BEGIN_DECLS
 
 #define LIBC_PATH LIB_PATH "/" LIBC_NAME
 
-#ifndef ANDROID
-typedef struct __darwin_pthread_handler_rec __pthread_cleanup_t;
-typedef void (*__pthread_cleanup_func_t)(void *);
-#endif
-
 #if defined(HAVE_UNWIND_CONTEXT_STRUCT) || defined(__clang__)
 typedef struct _Unwind_Context __unwind_context;
 #else
 typedef _Unwind_Context __unwind_context;
 #endif
 typedef _Unwind_Reason_Code (*bt_func)(__unwind_context* context, void* arg);
-
-#ifdef __APPLE__
-#define CLOCK_THREAD_CPUTIME_ID 99
-#endif
-struct tls_info;
 
 struct libc_iface {
 	void *dso;
@@ -124,16 +114,18 @@ struct libc_iface {
 	void *(*pthread_getspecific)(pthread_key_t key);
 	int (*pthread_setspecific)(pthread_key_t key, const void *val);
 
+#ifdef ANDROID
 	void (*__pthread_cleanup_push)(__pthread_cleanup_t *c,
 				       __pthread_cleanup_func_t func,
 				       void *arg);
 	void (*__pthread_cleanup_pop)(__pthread_cleanup_t *c, int execute);
 	ssize_t (*readlink)(const char *path, char *buf, size_t bufsize);
+#endif
 
 	int (*pthread_mutex_lock)(pthread_mutex_t *mutex);
 	int (*pthread_mutex_unlock)(pthread_mutex_t *mutex);
 
-	int (*_snprintf)(char *str, size_t size, const char *format, ...);
+	int (*snprintf)(char *str, size_t size, const char *format, ...);
 	int (*printf)(const char *fmt, ...);
 	int (*fprintf)(FILE *f, const char *fmt, ...);
 	long (*strtol)(const char *str, char **endptr, int base);
@@ -165,7 +157,7 @@ struct libc_iface {
 
 	/* unwind interface */
 	uintptr_t (*_Unwind_GetIP)(__unwind_context *ctx);
-#if defined(__arm__) && !defined(__clang__)
+#ifdef __arm__
 	_Unwind_VRS_Result (*_Unwind_VRS_Get)(__unwind_context *context,
 					      _Unwind_VRS_RegClass regclass,
 					      uint32_t regno,
@@ -179,6 +171,8 @@ extern struct libc_iface libc;
 
 extern int cached_pid;
 extern int log_timing;
+
+struct tls_info;
 
 extern int  __set_wrapping(void);
 extern void __clear_wrapping(void);
@@ -413,7 +407,7 @@ extern void __bt_raw_print(struct tls_info *tls,
 		if (!__logpos) \
 			break; \
 		libc.memcpy(__logpos, (____tls)->info.tv_str, __len); \
-		__len += libc._snprintf((char *)__logpos + __len, \
+		__len += libc.snprintf((char *)__logpos + __len, \
 				       __remain - __len, fmt "\n ", ## __VA_ARGS__ ); \
 		__ret = __bt_raw_maybe_finish(____tls, __len, __remain); \
 		if (__ret > 0) \
