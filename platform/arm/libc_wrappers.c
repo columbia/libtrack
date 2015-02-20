@@ -433,23 +433,23 @@ void __hidden setup_wrap_cache(void)
 	/* TODO: mmap ? */
 
 	/* functions that we don't want to backtrace */
-	add_entry("memset", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
-	add_entry("memcpy", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
-	add_entry("memcmp", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
-	add_entry("memmove", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
-	add_entry("memmem", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
-	add_entry("memswap", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
-	add_entry("memrchr", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
-	add_entry("__memcmp16", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
+	add_entry("memset", NULL, WF_NOTRACE | WF_NOARGS);
+	add_entry("memcpy", NULL, WF_NOTRACE | WF_NOARGS);
+	add_entry("memcmp", NULL, WF_NOTRACE | WF_NOARGS);
+	add_entry("memmove", NULL, WF_NOTRACE | WF_NOARGS);
+	add_entry("memmem", NULL, WF_NOTRACE | WF_NOARGS);
+	add_entry("memswap", NULL, WF_NOTRACE | WF_NOARGS);
+	add_entry("memrchr", NULL, WF_NOTRACE |  WF_NOARGS);
+	add_entry("__memcmp16", NULL, WF_NOTRACE | WF_NOARGS);
 	add_entry("malloc", NULL, WF_NOTRACE);
 	add_entry("realloc", NULL, WF_NOTRACE);
 	add_entry("calloc", NULL, WF_NOTRACE);
-	add_entry("free", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
-	add_entry("__memcpy_chk", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
-	add_entry("__memmove_chk", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
-	add_entry("pthread_getspecific", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
-	add_entry("pthread_setspecific", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
-	add_entry("pthread_self", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
+	add_entry("free", NULL, WF_NOTRACE | WF_NOARGS);
+	add_entry("__memcpy_chk", NULL, WF_NOTRACE | WF_NOARGS);
+	add_entry("__memmove_chk", NULL, WF_NOTRACE | WF_NOARGS);
+	add_entry("pthread_getspecific", NULL, WF_NOTRACE | WF_NOARGS);
+	add_entry("pthread_setspecific", NULL, WF_NOTRACE | WF_NOARGS);
+	add_entry("pthread_self", NULL, WF_NOTRACE | WF_NOARGS);
 	add_entry("clock_gettime", NULL, WF_NOTRACE | WF_NOTIME | WF_NOARGS);
 }
 

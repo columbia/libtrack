@@ -435,7 +435,20 @@ $c_flags $linebreak
         -DPTHREAD_DEBUG -DPTHREAD_DEBUG_ENABLED=0
 __EOF
 )
-		fi
+    else
+			src_files=$(cat <<-__EOF
+$src_files $linebreak
+        platform/${ARCH}/libc_wrappers.c $linebreak
+        platform/${ARCH}/libother_init.cpp
+__EOF
+)
+			c_flags=$(cat <<-__EOF
+$c_flags $linebreak
+        -DCRT_LEGACY_WORKAROUND $linebreak
+        -DPTHREAD_DEBUG -DPTHREAD_DEBUG_ENABLED=0
+__EOF
+)
+    fi
 	fi
 	if [ "${ARCH}" = "arm" -o "${ARCH}" = "armv7" ]; then
 		ic_flags=$(cat <<-__EOF
@@ -540,6 +553,14 @@ LOCAL_NO_CRT := true
 __EOF
 )
 	fi
+
+if [ "${LIB}" != "libc.so" ]; then
+ANDROID_MK=$(cat -<<__EOF
+$ANDROID_MK
+LOCAL_LDFLAGS += -lc
+__EOF
+)
+fi
 
 	ANDROID_MK=$(cat -<<__EOF
 $ANDROID_MK
@@ -927,25 +948,13 @@ if [ ! -z "$SYMFILE" ]; then
 fi
 
 if [ -z "${LIB}" -a -d "${LIBDIR}" ]; then
-	LIB_KERNEL="${LIBDIR}/libsystem_kernel.dylib"
-
-    # Extracting syscalls from libsystem_kernel
-    tf_code="${CDIR}/.$$.$RANDOM.code.tmp"
-    tf_syscalls="${CDIR}/.$$.$RANDOM.syscalls.tmp"
-    extract_code "$LIB_KERNEL" "$tf_code"
-    extract_syscalls "$tf_code" "$tf_syscalls"
-    rm $tf_code
-
-	if [ "$LIBTYPE" = "elf" ]; then
-		ALL_LIBS=`find "${LIBDIR}" -type f -name '*so'`
-	elif [ "$LIBTYPE" = "macho" ]; then
+    if [ "$LIBTYPE" = "elf" ]; then
+        ALL_LIBS=`find "${LIBDIR}" -type f -name '*so'`
+    elif [ "$LIBTYPE" = "macho" ]; then
         ALL_LIBS=`find "${LIBDIR}" -type f -name '*dylib'`
     fi
 
     for l in ${ALL_LIBS}; do
-        if [ "$l" = "$LIB_KERNEL" ]; then
-            continue
-        fi
         echo -e "\tProcessing \"$l\""
         _l="${l#${LIBDIR}/}"        #original name of source library
         __l="_${_l:1}"              #fake name with same length
@@ -957,14 +966,18 @@ if [ -z "${LIB}" -a -d "${LIBDIR}" ]; then
         _l_real="${_l_symdir}/${LIBPFX}$(basename ${_l})" #source library after HIDDING all symbols
 
         tf_code="${CDIR}/.$$.$RANDOM.code.tmp"
+        tf_syscalls="${CDIR}/.$$.$RANDOM.syscalls.tmp"
         extract_code "$l" "$tf_code"
-        extract_syscall_tree "$tf_code" "$tf_syscalls"
+        if [ $WRAPALL -eq 0 ]; then
+          extract_syscalls "$tf_code" "$tf_syscalls"
+          extract_syscall_tree "$tf_code" "$tf_syscalls"
+        fi
         extract_functions "$l"
         strip_library "$l" "${_l_real}" "${_l_symdir}/real_syms.h"
         write_wrappers "${_l_out}" "${LIB_BASE}/${__l//./_}"
         rm -f "$tf_code"
+        rm -f "$tf_syscalls"
     done
-    rm -f "$tf_syscalls"
 else
     tf_code="${CDIR}/.$$.$RANDOM.code.tmp"
     tf_syscalls="${CDIR}/.$$.$RANDOM.syscalls.tmp"
