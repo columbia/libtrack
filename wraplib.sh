@@ -947,7 +947,7 @@ if [ ! -z "$SYMFILE" ]; then
     echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
 fi
 
-if [ -z "${LIB}" -a -d "${LIBDIR}" ]; then
+if [ -d "${LIBDIR}" ]; then
     if [ "$LIBTYPE" = "elf" ]; then
         ALL_LIBS=`find "${LIBDIR}" -type f -name '*so'`
     elif [ "$LIBTYPE" = "macho" ]; then
