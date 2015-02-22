@@ -177,7 +177,11 @@ sub always_wrap() {
 	@_always_wrap{ keys %h } = values %h;
 	%h = posix_users();
 	@_always_wrap{ keys %h } = values %h;
-	return %_always_wrap;
+	%h = posix_string();
+  @_always_wrap{ keys %h } = values %h;
+  %h = posix_math();
+  @_always_wrap{ keys %h } = values %h;
+  return %_always_wrap;
 }
 
 #
@@ -187,8 +191,9 @@ sub always_wrap() {
 
 # regular expressions (keep this list short)
 my %_never_wrap_re = ( '.*@plt.*' => 1,
-		      '.*divmod.*' => 1,
-		      '.*_(rd|rw|un|try)*lock[^a-zA-Z]*' => 1,
+          '__aeabi.*' => 1,
+#		      '.*divmod.*' => 1,
+#		      '.*_(rd|rw|un|try)*lock[^a-zA-Z]*' => 1,
 );
 sub never_wrap_re() {
 	return %_never_wrap_re;
@@ -231,7 +236,7 @@ my %_never_wrap = (
 		   "__aeabi_unwind_cpp_pr0" => 1,
 		   "__aeabi_unwind_cpp_pr1" => 1,
 
-		   # string operations
+         # string operations
 		   "__strncat_chk" => 1,
 		   "__strcpy_chk" => 1,
 		   "__strncpy_chk" => 1,
@@ -270,11 +275,11 @@ my %_never_wrap = (
 );
 
 sub never_wrap() {
-	my %h;
-	%h = posix_string();
-	@_never_wrap{ keys %h } = values %h;
-	%h = posix_math();
-	@_never_wrap{ keys %h } = values %h;
+  my %h = ( "_empty_" => 1,);
+  #%h = posix_string();
+  #@_never_wrap{ keys %h } = values %h;
+  #%h = posix_math();
+  #@_never_wrap{ keys %h } = values %h;
 	return %_never_wrap;
 }
 
