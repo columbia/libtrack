@@ -836,8 +836,9 @@ function strip_elf_library() {
 
     # Extract a non-function symbol and remember its name and address.
     # This will be used to find the address where the binary will be loaded.
-    ${ELF_OBJDUMP} -T "$out" | grep "DO\s.bss" | head -1 \
-			| awk '{print "SAVED(0x"$1","$6")"}' >> "${symtable}"
+    ${ELF_OBJDUMP} -T "$out" | grep -v "DF\s\+.text\|UND"|\
+      grep "DO\s\.bss\s\+\|DO\s.rodata\s\+\|DO\s.data\s\+\|D\s\+\*ABS\*" |\
+      head -1 | awk '{print "SAVED(0x"$1","$6")"}' >> "${symtable}"
 
     echo -e "\tHidding "$(wc -l ${tf_funclist} | $SED 's,\s.*,,g')" symbols in file "$out"."
 	# The 'STRIP' variable here points to our custom 'elfmod.py' script
