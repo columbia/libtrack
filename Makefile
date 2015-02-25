@@ -11,15 +11,14 @@ OUT=wrapped
 endif
 
 ifeq ($(LIB),)
-LIB=droid/libc.so
+LIB=droid
 endif
 
 all: init_wrappers install_wrappers
 
 init_wrappers:
 	@echo "Hidding symbols and initializing static lookup  table."
-	./wraplib.sh --use-ndk --out $(OUT) --lib $(LIB) --type elf --arch arm
-#	--wrap-all
+	./wraplib.sh --use-ndk --out $(OUT) --lib $(LIB) --type elf --arch arm --wrap-all
 
 install_wrappers: init_wrappers
 	@echo "Installing Wrappers"

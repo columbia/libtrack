@@ -445,6 +445,7 @@ __EOF
 			c_flags=$(cat <<-__EOF
 $c_flags $linebreak
         -DCRT_LEGACY_WORKAROUND $linebreak
+        -DNO_DVM_BACKTRACE $linebreak
         -DPTHREAD_DEBUG -DPTHREAD_DEBUG_ENABLED=0
 __EOF
 )

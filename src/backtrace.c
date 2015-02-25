@@ -312,9 +312,10 @@ _static void print_bt_state(struct tls_info *tls, struct bt_state *state)
 #endif
 	}
 
+#ifndef NO_DVM_BACKTRACE
 	if (state->dvm_bt && state->dvm_bt->count > 0)
 		print_dvm_bt(tls, &dvm, state->dvm_bt);
-
+#endif
 	/* bt_printf(tls, "BT:END:"); */
 }
 
@@ -494,10 +495,10 @@ unwind_backtrace(struct tls_info *tls)
 	for (i = 0; i < state.count; i++)
 		info->last_stack[i] = state.frame[i].pc;
 
+#ifndef NO_DVM_BACKTRACE
 	get_dvm_backtrace(tls, &dvm, &state, &dvm_bt);
-
+#endif
 	print_bt_state(tls, &state);
-
 	/* print stack usage! */
 	stack_sz = (unsigned)state.frame[state.count-1].sp
 			+ WRAPPER_STACK_SZ
