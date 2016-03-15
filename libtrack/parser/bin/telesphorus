@@ -1,0 +1,72 @@
+#!/usr/bin/env python
+import sys
+
+from telesphorus import errors
+from telesphorus import settings
+from telesphorus import trace_graphs
+from telesphorus.helpers import printing
+
+CONFIG_FILE_PATH = "/etc/telesphorus/main.conf"
+
+
+def main(argv=sys.argv):
+    """Application entrypoint."""
+
+    TRACEDIR = FILTER_FILE = None
+    GRAPH_FILE = "/home/vatlidak/Repos/telesphorus/graph.txt"
+    for i in range(len(argv)):
+        if argv[i] == '-t':
+            TRACEDIR = argv[i + 1]
+        if argv[i] == '-f':
+            FILTER_FILE = argv[i + 1]
+        if argv[i] == '-g':
+            GRAPH_FILE = argv[i + 1]
+
+    if len(argv) > 7 or len(argv) < 3:
+        print ("Usage: %s -t TRACEDIR_NAME [-f FILTER_FILE]"
+               "[-g GRAPH_FILE]" % (argv[0]))
+        return
+
+    s = settings.Settings()
+    try:
+        s.parse_config(CONFIG_FILE_PATH)
+    except errors.TelesphorusConfigError, error:
+        print error
+        raise
+
+    tg = trace_graphs.TraceGraph.parse_traces(TRACEDIR, s, FILTER_FILE)
+    printing.graph_stats(tg)
+
+#    gf = open(GRAPH_FILE, "w+")
+#    try:
+#        for edge in tg.edges(data=True):
+#            gf.writelines("%s,%s,%s\n" % (edge[0], edge[1], edge[2]['weight']))
+#    finally:
+#        gf.close()
+#
+#    if s.LIB:
+#        printing.lib_stats(tg, s)
+#    if s.LIB_CALL:
+#        printing.lib_call_stats(tg, s)
+#    if s.POSIX_CALL:
+#        printing.posix_call_stats(tg, s)
+    if s.TIMING_POSIX:
+        printing.posix_timing_stats(tg, s)
+#    if s.STACK_DEPTH:
+#        printing.stack_depth_stats(tg, s)
+#
+#    if s.FULL_PATH:
+#        printing.full_path_stats(tg, s)
+#    if s.HIDDEN_ABSTR:
+#        printing.hidden_abstractions(tg, s)
+#    if s.OBSOLETE_ABSTR:
+#        printing.obsolete_abstractions(tg, s)
+#    if s.MISSING_ABSTR:
+#        printing.missing_abstractions(tg, s)
+#    if s.OBSCURITY_RATIO:
+#        printing.obscurity_ratio(tg, s)
+#    if s.CIRCULAR_ABSTR:
+#        printing.circular_abstractions(tg, s)
+
+if __name__ == '__main__':
+    sys.exit(main())

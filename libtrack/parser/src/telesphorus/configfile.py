@@ -1,0 +1,26 @@
+CONFIG_GRAMMAR = """
+[main]
+degree_in = boolean(default='True')
+full_path = boolean(default='True')
+lib_call = boolean(default='True')
+posix_call = boolean(default='True')
+timing_posix = boolean(default='True')
+stack_depth = boolean(default='True')
+lib = boolean(default='True')
+hidden_abstr = boolean(default='True')
+obsolete_abstr = boolean(default='True')
+missing_abstr = boolean(default='True')
+circular_abstr = boolean(default='True')
+obscurity_ratio = boolean(default='True')
+
+full_path_threashold = float(default=0.0)
+lib_threashold = float(default=0.0)
+lib_call_threashold = float(default=0.0)
+posix_call_threashold = float(default=0.0)
+hidden_abstr_threashold = float(default=0.0)
+obsolete_abstr_threashold = float(default=0.0)
+missing_abstr_samples = integer(default=0)
+missing_abstr_max_window_size = integer(default=0)
+circular_abstr_samples = integer(default=0)
+obscurity_samples = integer(default=0)
+"""
