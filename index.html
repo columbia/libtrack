@@ -28,11 +28,22 @@
 <h3>Our research</h3>
 
 <p>
-Our goal to study how standardized system abstractions are
-being used by modern workloads, and whether they are
-being replaced by other abstractions. We are interested in a broad set of
-questions that are intimately entwined with the future of systems design and
-application development, such as:
+
+The POSIX standard, developed 25 years ago, comprises a set of operating
+system (OS) abstractions that aid application portability across
+UNIX-based OSes. While OSes and applications have evolved tremendously
+the last 25 years --- modern applications for today’s smartphones,
+desktop PCs, and tablets, interact with multiple layers of software
+frameworks and libraries implemented atop the OS --- POSIX, and the basic
+set of abstractions it provides, has remained largely unchanged. Yet,
+little has been done to measure how and to what extend traditional POSIX
+abstractions are being used in modern OSes, and whether new abstractions
+are taking form dethroning traditional ones.
+
+Our goal is to provide a rigorous characterization of any changes across the
+wide range of system abstractions standardized in POSIX.  We are interested
+in a broad set of questions that are intimately entwined with the future of
+systems design and application development, such as:
 
 <li>
 Which POSIX abstractions are still being used and relevant for
@@ -68,8 +79,8 @@ of these uses?
 <p>
 <p>
 <p>
-We believe that the answers to these questions will be
-relevant to a wide audience, including: researchers, who can design and
+We believe that the answers to these questions will be relevant to a wide
+audience, including: researchers, who can design and
 optimize their systems by leveraging current, broadly applicable trends in
 application workloads;
 application developers, who may take advantage of new and more powerful
