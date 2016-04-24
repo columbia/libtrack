@@ -51,7 +51,8 @@ LIBPFX=real_
 function usage() {
 	echo -e "Usage: $0 --lib path/to/library "
 	echo -e "                          [--wrap-all]"
-	echo -e "                          [--arch {arm|armv7}]"
+	echo -e "                          [--wrap-specific symfile]"
+	echo -e "                          [--arch {arm|armv7|x86}]"
 	echo -e "                          [--type {elf|macho}]"
 	echo -e "                          [--out path/to/output/dir]"
 	echo -e "                          [--use-ndk]"
