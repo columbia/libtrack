@@ -1,24 +1,25 @@
 #!/bin/bash
 
-HEADER="/home/vatlidak/repos/systrace/arch/x86/include/header.h"
-BACKTRACE="/home/vatlidak/repos/systrace/arch/x86/src/backtrace.c"
-LOGTIME="/home/vatlidak/repos/systrace/arch/x86/src/logtime.c"
+HEADER="../arch/x86/include/header.h"
+BACKTRACE="../arch/x86/src/backtrace.c"
+LOGTIME="../arch/x86/src/logtime.c"
 
-GNU_EXTENSIONS="/home/vatlidak/repos/systrace/arch/x86/src/gnu_extensions.c"
-SPECIAL="/home/vatlidak/repos/systrace/arch/x86/src/special.c"
-ALGO="/home/vatlidak/repos/systrace/arch/x86/src/algorithms.c"
-ARGS="/home/vatlidak/repos/systrace/arch/x86/src/arguments.c"
-FS="/home/vatlidak/repos/systrace/arch/x86/src/fs.c"
-IPC="/home/vatlidak/repos/systrace/arch/x86/src/ipc.c"
-MEM="/home/vatlidak/repos/systrace/arch/x86/src/memory.c"
-NET="/home/vatlidak/repos/systrace/arch/x86/src/network.c"
-PROC="/home/vatlidak/repos/systrace/arch/x86/src/processes.c"
-PTHREADS="/home/vatlidak/repos/systrace/arch/x86/src/pthreads.c"
-TERM="/home/vatlidak/repos/systrace/arch/x86/src/terminals.c"
-TIME="/home/vatlidak/repos/systrace/arch/x86/src/time.c"
-USERS="/home/vatlidak/repos/systrace/arch/x86/src/users.c"
-MISC="/home/vatlidak/repos/systrace/arch/x86/src/misc.c"
+GNU_EXTENSIONS="../arch/x86/src/gnu_extensions.c"
+SPECIAL="../arch/x86/src/special.c"
+ALGO="../arch/x86/src/algorithms.c"
+ARGS="../arch/x86/src/arguments.c"
+FS="../arch/x86/src/fs.c"
+IPC="../arch/x86/src/ipc.c"
+MEM="../arch/x86/src/memory.c"
+NET="../arch/x86/src/network.c"
+PROC="../arch/x86/src/processes.c"
+PTHREADS="../arch/x86/src/pthreads.c"
+TERM="../arch/x86/src/terminals.c"
+TIME="../arch/x86/src/time.c"
+USERS="../arch/x86/src/users.c"
+MISC="../arch/x86/src/misc.c"
 #
+pwd
 if [ ! -f $HEADER ]; then
     echo "Missing HEADER"
     exit -1
