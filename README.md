@@ -5,7 +5,7 @@ the [traces](https://github.com/columbia/libtrack/tree/master/traces) used for t
 ---
 
 
-![POSIX abstractions in Modern Operating Systems](https://github.com/columbia/libtrack/blob/master/paper.png)
+[![POSIX abstractions in Modern Operating Systems](https://github.com/columbia/libtrack/blob/master/paper.png)](http://www.cs.columbia.edu/~vatlidak/POSIXpaper.pdf)
 
 You can watch the talk [here](XXX) and download the slides from [here](http://www.cs.columbia.edu/~vatlidak/POSIXprez.pdf).
 
