@@ -17,7 +17,7 @@ def graph_stats(trace_graph):
     """General graph statistics"""
     print "\nA graph with %d nodes and %d edges created." % \
         (trace_graph.order(), trace_graph.size())
-    print "Total POSIX API invokations: %d" % \
+    print "Total POSIX API invocations: %d" % \
         stats.posix_invocations(trace_graph)
 #    print "Average path length: %d\n\n" % \
 #        stats.average_full_path_len(trace_graph)
@@ -37,7 +37,7 @@ def graph_stats(trace_graph):
 def lib_stats(trace_graph, settings):
     """For each lib print :
         1) The amount of times each POSIX call invoked by the above lib.
-        2) Total POSIX invokations the above lib accounted for.
+        2) Total POSIX invocations the above lib accounted for.
     """
     threashold = settings.LIB_THREASHOLD
     posix_total = stats.posix_invocations(trace_graph)
@@ -112,7 +112,7 @@ def posix_timing_stats(trace_graph, settings):
 def posix_call_stats(trace_graph, settings):
     """For each POSIX call, print:
         1) All library function callers
-        2) Aggregate results groupeing caller into libraries
+        2) Aggregate results grouping caller into libraries
     """
     threashold = settings.POSIX_CALL_THREASHOLD
     posix_total = stats.posix_invocations(trace_graph)

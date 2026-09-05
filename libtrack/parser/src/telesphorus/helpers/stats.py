@@ -1,5 +1,5 @@
 """
-Module documenation
+Module documentation
 goes here
 """
 

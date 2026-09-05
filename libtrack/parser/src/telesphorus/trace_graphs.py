@@ -94,7 +94,7 @@ class TraceGraph(DiGraph):
                 self.native_calls[path[-2]] = {}
                 self.native_calls[path[-2]][path[-1]] = 1
 
-            # keep all full paths and occurencies
+            # keep all full paths and occurrences
             if PATH_DELIMITER.join(path) in self.full_paths_dict:
                 self.full_paths_dict[PATH_DELIMITER.join(path)] += 1
             else:

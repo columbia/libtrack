@@ -13,7 +13,7 @@ calls_list = []
 
 def main(argv=sys.argv):
     """
-    Identify missing abstration of frequently occuring
+    Identify missing abstraction of frequently occurring
     patterns and print them.
     """
     if len(argv) != 7:

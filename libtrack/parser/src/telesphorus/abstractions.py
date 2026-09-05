@@ -36,7 +36,7 @@ def hidden_abstraction(trace_graph, settings):
 def obsolete_abstraction(trace_graph, settings):
     """
     Identify obsolete abstractions and print those
-    that occured with paercentage less than "threashold".
+    that occured with percentage less than "threashold".
     """
     threashold = settings.OBSOLETE_ABSTR_THREASHOLD
     posix_total = stats.posix_invocations(trace_graph)
@@ -48,7 +48,7 @@ def obsolete_abstraction(trace_graph, settings):
 
 def missing_abstractions(trace_graph, settings):
     """
-    Identify missing abstration of frequently occuring
+    Identify missing abstraction of frequently occurring
     patterns and print them.
     """
     posix_calls_list = trace_graph.posix_calls_list
